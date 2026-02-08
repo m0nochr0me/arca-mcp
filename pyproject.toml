@@ -1,7 +1,7 @@
 [project]
 name = "arca-mcp"
 version = "0.1.0"
-description = "Add your description here"
+description = "Arca Memory Core - MCP Server for compact memories."
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
