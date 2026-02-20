@@ -66,7 +66,7 @@ All settings are configured via environment variables with the `ARCA_` prefix, o
 
 All tools are mounted under the `memory` namespace. Operations are scoped to the namespace provided via the `X-namespace` HTTP header (defaults to `"default"`).
 
-### `memory_add`
+### `memory/add`
 
 Store content in memory with a vector embedding.
 
@@ -74,10 +74,12 @@ Store content in memory with a vector embedding.
 | - | - | - | - |
 | `content` | `str` | yes | Content to store |
 | `bucket` | `str \| null` | no | Bucket name (defaults to `"default"`) |
+| `connected_nodes` | `list[str] \| null` | no | UUIDs of nodes to link at creation time |
+| `relationship_types` | `list[str] \| null` | no | Parallel relationship labels for `connected_nodes` |
 
 **Returns:** `{ "status": "Memory added", "memory_id": "<uuid>" }`
 
-### `memory_get`
+### `memory/get`
 
 Retrieve memories via semantic similarity search.
 
@@ -89,7 +91,7 @@ Retrieve memories via semantic similarity search.
 
 **Returns:** `{ "status": "Memory retrieved", "results": [...] }`
 
-### `memory_delete`
+### `memory/delete`
 
 Delete a specific memory by its UUID.
 
@@ -99,7 +101,7 @@ Delete a specific memory by its UUID.
 
 **Returns:** `{ "status": "Memory deleted" }`
 
-### `memory_clear`
+### `memory/clear`
 
 Clear all memories in a bucket.
 
@@ -109,13 +111,49 @@ Clear all memories in a bucket.
 
 **Returns:** `{ "status": "Memories cleared" }`
 
-### `memory_list_buckets`
+### `memory/list_buckets`
 
 List all buckets in the current namespace.
 
 **Parameters:** None
 
 **Returns:** `{ "buckets": ["default", "work", ...] }`
+
+### `memory/connect`
+
+Create a directed edge between two memory nodes.
+
+| Parameter | Type | Required | Description |
+| - | - | - | - |
+| `source_id` | `str` | yes | UUID of the source node |
+| `target_id` | `str` | yes | UUID of the target node |
+| `relationship_type` | `str` | yes | Edge label (e.g. `"related_to"`, `"depends_on"`) |
+
+**Returns:** `{ "status": "Memories connected" }`
+
+### `memory/disconnect`
+
+Remove one or all directed edges between two nodes.
+
+| Parameter | Type | Required | Description |
+| - | - | - | - |
+| `source_id` | `str` | yes | UUID of the source node |
+| `target_id` | `str` | yes | UUID of the target node |
+| `relationship_type` | `str \| null` | no | If provided, only remove this edge label; otherwise remove all edges |
+
+**Returns:** `{ "status": "Memories disconnected" }`
+
+### `memory/traverse`
+
+Traverse the knowledge graph starting from a node.
+
+| Parameter | Type | Required | Description |
+| - | - | - | - |
+| `memory_id` | `str` | yes | UUID of the starting node |
+| `relationship_type` | `str \| null` | no | Filter traversal to this edge label |
+| `depth` | `int` | no | Number of hops (default: `1`) |
+
+**Returns:** `{ "status": "Graph traversed", "results": [...] }` — each result includes a `_depth` field.
 
 ## REST API
 
@@ -130,6 +168,9 @@ Interactive API docs are available at `/docs` when the server is running.
 | `DELETE` | `/v1/memories/{memory_id}` | Delete a specific memory |
 | `DELETE` | `/v1/memories?bucket=...` | Clear memories in a bucket |
 | `GET` | `/v1/buckets` | List all buckets |
+| `POST` | `/v1/memories/connect` | Create a directed edge between two nodes |
+| `POST` | `/v1/memories/disconnect` | Remove edges between two nodes |
+| `GET` | `/v1/memories/{memory_id}/connected` | Traverse the knowledge graph from a node |
 
 ### Examples
 
