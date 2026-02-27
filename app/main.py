@@ -11,6 +11,7 @@ from asgi_correlation_id import CorrelationIdMiddleware
 from fastapi import FastAPI, Request, Response
 from fastmcp import FastMCP
 from fastmcp.server.auth.providers.debug import DebugTokenVerifier
+from fastmcp.server.providers.skills import SkillsDirectoryProvider
 from ulid import ULID
 
 from app.api.memory import router as memory_router
@@ -19,9 +20,11 @@ from app.core.config import settings
 from app.core.db import close_db
 from app.core.log import logger
 from app.schema.status import HealthCheckResponse, IndexResponse
+from app.util.base_dir import get_module_root
 
 exec_id = ULID()
 start_time = perf_counter()
+base_dir = get_module_root("app")
 
 verifier = DebugTokenVerifier(
     validate=lambda token: secrets.compare_digest(token, settings.APP_AUTH_KEY),
@@ -34,7 +37,12 @@ mcp_server = FastMCP(
     version=settings.PROJECT_VERSION,
     auth=verifier,
 )
-
+mcp_server.add_provider(
+    SkillsDirectoryProvider(
+        roots=base_dir / "skills",
+        reload=False,
+    )
+)
 
 @mcp_server.resource("resource://health_check")
 async def get_health() -> str:
@@ -50,7 +58,7 @@ async def get_health() -> str:
 
 # Mount Full MCP Contexts
 mcp_server.mount(memory_server, namespace="memory")
-mcp_app = mcp_server.http_app(path="/mcp")
+mcp_app = mcp_server.http_app(path="/mcp", json_response=True)
 
 
 # Combine lifespan
