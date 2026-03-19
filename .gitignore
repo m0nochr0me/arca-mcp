@@ -19,6 +19,7 @@ wheels/
 scratch/
 
 # AI assistant files
+.vscode/
 .claude/
 .github/
 *mcp.json
