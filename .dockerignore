@@ -13,3 +13,4 @@
 .lancedb/
 __pycache__/
 scratch/
+.ruff_cache/

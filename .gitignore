@@ -22,4 +22,5 @@ scratch/
 .vscode/
 .claude/
 .github/
+.ruff_cache/
 *mcp.json
