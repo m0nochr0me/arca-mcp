@@ -16,6 +16,7 @@ from app.util.memory import (
     delete_memory,
     disconnect_memories,
     get_connected,
+    get_last_memories,
     get_memory,
 )
 
@@ -76,6 +77,30 @@ async def get(
     """
     namespace = _get_namespace()
     results = await get_memory(query, bucket, namespace, top_k=top_k)
+
+    return {
+        "status": "Memory retrieved" if results else "No memory found",
+        "results": results,
+    }
+
+
+@server.tool(tags={"memory"})
+async def get_last(
+    n: Annotated[int, "Number of recent memories to return"] = 5,
+    bucket: Annotated[str | None, "Optional bucket name"] = None,
+) -> dict[str, Any]:
+    """
+    Retrieve the last N memories ordered by creation time (most recent first).
+
+    Args:
+        n: Number of recent memories to return (default 5)
+        bucket: Optional bucket name to filter by
+
+    Returns:
+        dict[str, Any]: The retrieved memory items.
+    """
+    namespace = _get_namespace()
+    results = await get_last_memories(n, bucket, namespace)
 
     return {
         "status": "Memory retrieved" if results else "No memory found",

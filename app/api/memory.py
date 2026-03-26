@@ -18,6 +18,7 @@ from app.schema.memory import (
     MemoryAddResponse,
     MemoryClearResponse,
     MemoryDeleteResponse,
+    MemoryGetLastRequest,
     MemorySearchRequest,
     MemorySearchResponse,
     MemorySearchResult,
@@ -30,6 +31,7 @@ from app.util.memory import (
     delete_memory,
     disconnect_memories,
     get_connected,
+    get_last_memories,
     get_memory,
 )
 
@@ -63,6 +65,22 @@ async def search_memories(
 ) -> MemorySearchResponse:
     """Search memories using semantic similarity."""
     results = await get_memory(body.query, body.bucket, namespace, top_k=body.top_k)
+    return MemorySearchResponse(
+        status="Memory retrieved" if results else "No memory found",
+        results=[MemorySearchResult.model_validate(r) for r in results],
+    )
+
+
+@router.post(
+    "/memories/last",
+    response_model=MemorySearchResponse,
+)
+async def last_memories(
+    body: MemoryGetLastRequest,
+    namespace: str = Depends(get_namespace),
+) -> MemorySearchResponse:
+    """Retrieve the most recent memories ordered by creation time."""
+    results = await get_last_memories(body.n, body.bucket, namespace)
     return MemorySearchResponse(
         status="Memory retrieved" if results else "No memory found",
         results=[MemorySearchResult.model_validate(r) for r in results],

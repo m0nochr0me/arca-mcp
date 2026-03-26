@@ -15,6 +15,7 @@ header — no agent action required.
 |------|-----------|
 | `memory_add` | `(content, bucket?, connected_nodes?, relationship_types?)` → `{memory_id}` |
 | `memory_get` | `(query, bucket?, top_k=5)` → `{results}` |
+| `memory_get_last` | `(n=5, bucket?)` → `{results}` — most recent by creation time |
 | `memory_delete` | `(memory_id)` |
 | `memory_clear` | `(bucket?)` — clears `"default"` if omitted |
 | `memory_list_buckets` | `()` → `{buckets}` |
@@ -145,6 +146,18 @@ The backend uses Gemini's `RETRIEVAL_QUERY` task type (asymmetric embedding). Ph
 | Context recall at session start | 10 |
 | Broad domain scan | 20 |
 | Full history review | 50 |
+
+### Chronological Retrieval
+
+Use `memory_get_last` when you need the most recently stored memories rather than the most semantically similar:
+
+| Scenario | Recommended approach |
+|----------|---------------------|
+| "What did we just discuss?" | `memory_get_last(n=5)` |
+| "Recent decisions in this project" | `memory_get_last(n=10, bucket="project-foo")` |
+| "Find memories about auth" | `memory_get("authentication decisions")` (semantic) |
+
+All memories now carry a `created_at` UTC timestamp. Pre-existing memories (created before the timestamp migration) have `created_at: null` and sort last in chronological queries.
 
 ### Handling No Results
 

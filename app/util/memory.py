@@ -3,6 +3,7 @@ Utility functions for memory storage and retrieval using LanceDB.
 """
 
 import re
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pyarrow as pa
@@ -38,6 +39,7 @@ __all__ = (
     "delete_memory",
     "disconnect_memories",
     "get_connected",
+    "get_last_memories",
     "get_memory",
 )
 
@@ -50,6 +52,7 @@ _MEMORY_SCHEMA = pa.schema(
         ("connected_nodes", pa.list_(pa.string())),
         ("relationship_types", pa.list_(pa.string())),
         ("vector", pa.list_(pa.float32(), list_size=settings.EMBEDDING_DIMENSION)),
+        ("created_at", pa.timestamp("us", tz="UTC")),
     ]
 )
 
@@ -57,12 +60,22 @@ _MEMORY_SCHEMA = pa.schema(
 async def _get_memory_table() -> AsyncTable:
     """Get the LanceDB table for memory storage."""
     db = await get_db()
-    memory_table = await db.create_table(
-        name="memory",
-        schema=_MEMORY_SCHEMA,
-        mode="create",
-        exist_ok=True,
-    )
+
+    table_names = await db.table_names()
+    if "memory" in table_names:
+        memory_table = await db.open_table("memory")
+
+        # Migrate: add created_at column if missing (existing rows get NULL)
+        schema = await memory_table.schema()
+        if "created_at" not in schema.names:
+            await memory_table.add_columns(pa.field("created_at", pa.timestamp("us", tz="UTC")))
+    else:
+        memory_table = await db.create_table(
+            name="memory",
+            schema=_MEMORY_SCHEMA,
+            mode="create",
+        )
+
     return memory_table
 
 
@@ -85,12 +98,43 @@ async def get_memory(
     results = (
         await vector_query
         .where(f"namespace='{_sanitize(namespace, 'namespace')}'")
-        .select(["memory_id", "content", "bucket", "connected_nodes", "relationship_types"])
+        .select(["memory_id", "content", "bucket", "connected_nodes", "relationship_types", "created_at"])
         .limit(top_k)
         .to_list()
     )  # fmt: skip
 
     return results
+
+
+async def get_last_memories(
+    n: int = 5,
+    bucket: str | None = None,
+    namespace: str = "default",
+) -> list[dict]:
+    """Retrieve the last *n* memories ordered by creation time (most recent first).
+
+    Memories without a ``created_at`` timestamp (pre-migration rows) are sorted last.
+    """
+
+    table = await _get_memory_table()
+
+    query = table.query()
+
+    if bucket is not None:
+        query = query.where(f"bucket='{_sanitize(bucket, 'bucket')}'")
+
+    query = query.where(f"namespace='{_sanitize(namespace, 'namespace')}'")
+
+    results = (
+        await query
+        .select(["memory_id", "content", "bucket", "connected_nodes", "relationship_types", "created_at"])
+        .to_list()
+    )  # fmt: skip
+
+    # Most recent first; pre-migration rows without created_at sort last
+    results.sort(key=lambda r: r.get("created_at") or datetime.min.replace(tzinfo=UTC), reverse=True)
+
+    return results[:n]
 
 
 async def add_memory(
@@ -121,6 +165,7 @@ async def add_memory(
         "connected_nodes": nodes,
         "relationship_types": rels,
         "vector": embedding,
+        "created_at": datetime.now(UTC),
     }
 
     await table.add([data], mode="append")
@@ -288,7 +333,7 @@ async def get_connected(
             detail_rows = (
                 await table.query()
                 .where(f"memory_id=X'{target_uuid.hex}' AND namespace='{_sanitize(namespace, 'namespace')}'")
-                .select(["memory_id", "content", "bucket", "connected_nodes", "relationship_types"])
+                .select(["memory_id", "content", "bucket", "connected_nodes", "relationship_types", "created_at"])
                 .to_list()
             )  # fmt: skip
             for row in detail_rows:

@@ -2,6 +2,7 @@
 Request and response models for the Memory REST API.
 """
 
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -28,6 +29,11 @@ class MemorySearchRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=100, description="Number of top results to return")
 
 
+class MemoryGetLastRequest(BaseModel):
+    n: int = Field(default=5, ge=1, le=100, description="Number of recent memories to return")
+    bucket: str | None = Field(default=None, description="Optional bucket name")
+
+
 class MemoryAddResponse(BaseModel):
     status: str
     memory_id: UUID
@@ -39,6 +45,7 @@ class MemorySearchResult(BaseModel):
     bucket: str
     connected_nodes: list[str] = Field(default_factory=list)
     relationship_types: list[str] = Field(default_factory=list)
+    created_at: datetime | None = None
 
     model_config = ConfigDict(extra="ignore")
 
@@ -84,6 +91,7 @@ class ConnectedResult(BaseModel):
     bucket: str
     connected_nodes: list[str] = Field(default_factory=list)
     relationship_types: list[str] = Field(default_factory=list)
+    created_at: datetime | None = None
     depth: int = Field(alias="_depth")
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
