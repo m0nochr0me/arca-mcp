@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.14"
 
 [options]
-exclude-newer = "2026-03-26T06:21:24.446024287Z"
+exclude-newer = "2026-03-26T08:08:06.31492472Z"
 exclude-newer-span = "P7D"
 
 [[package]]
@@ -119,7 +119,7 @@ wheels = [
 
 [[package]]
 name = "arca-mcp"
-version = "0.1.0"
+version = "0.5.0"
 source = { virtual = "." }
 dependencies = [
     { name = "aiocache" },
