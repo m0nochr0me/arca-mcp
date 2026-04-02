@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+
+{% block head %}
+<link href="{{ url_for('static', path='/css/memory.css') }}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+{% raw %}
+<div id="memory-app" v-cloak>
+  <!-- Auth banner -->
+  <div v-if="!authKey" class="notice" style="margin-bottom: 22px;">
+    <span>Enter your API key to connect.</span>
+    <div class="row" style="margin-left: auto;">
+      <div class="field" style="flex-direction: row; align-items: center; gap: 8px;">
+        <input type="password" v-model="authKeyInput" placeholder="Bearer token" @keydown.enter="saveAuth"
+          style="width: 260px;">
+        <button class="primary" @click="saveAuth">Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="authKey" class="page">
+    <!-- Top bar -->
+    <div class="row spread">
+      <div class="row">
+        <div class="field" style="flex-direction: row; align-items: center; gap: 8px;">
+          <label>NS</label>
+          <select v-model="namespace" @change="reload" style="width: 160px;">
+            <option v-for="ns in namespaces" :key="ns" :value="ns">{{ ns }}</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <button @click="showAddForm = !showAddForm" class="primary">+ Add Memory</button>
+        <button @click="disconnectAuth" class="ghost">Disconnect</button>
+      </div>
+    </div>
+
+    <!-- Metrics strip -->
+    <div class="metric-strip">
+      <div class="metric">
+        <span class="muted">BUCKETS</span>
+        <strong>{{ buckets.length }}</strong>
+      </div>
+      <div class="metric">
+        <span class="muted">SHOWING</span>
+        <strong>{{ memories.length }}</strong>
+      </div>
+      <div class="metric">
+        <span class="muted">NAMESPACE</span>
+        <strong>{{ namespace || 'default' }}</strong>
+      </div>
+      <div class="metric" :class="{ standout: connected }">
+        <span class="muted">STATUS</span>
+        <strong>{{ connected ? 'ONLINE' : 'OFFLINE' }}</strong>
+      </div>
+    </div>
+
+    <!-- Add memory form -->
+    <div v-if="showAddForm" class="panel stack gap-3">
+      <p class="eyebrow">NEW MEMORY</p>
+      <div class="field">
+        <label>Content</label>
+        <textarea v-model="newMemory.content" rows="3" placeholder="Memory content..."></textarea>
+      </div>
+      <div class="row">
+        <div class="field" style="flex: 1;">
+          <label>Bucket</label>
+          <input type="text" v-model="newMemory.bucket" placeholder="default">
+        </div>
+      </div>
+      <div class="row right gap-2">
+        <button class="ghost" @click="showAddForm = false">Cancel</button>
+        <button class="primary" @click="addMemory" :disabled="!newMemory.content.trim() || saving">
+          {{ saving ? 'Saving...' : 'Save' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Main grid -->
+    <div class="grid-sidebar">
+      <!-- Sidebar -->
+      <div class="stack gap-3">
+        <!-- Buckets panel -->
+        <div class="panel stack gap-2">
+          <div class="row spread">
+            <p class="eyebrow">BUCKETS</p>
+            <button class="ghost" @click="showBucketForm = !showBucketForm" style="padding: 0 5px;"
+              title="Create bucket">+</button>
+          </div>
+          <!-- Create bucket inline -->
+          <div v-if="showBucketForm" class="row gap-1">
+            <input type="text" v-model="newBucketName" placeholder="Bucket name" style="flex: 1;"
+              @keydown.enter="createBucket">
+            <button class="primary" @click="createBucket" :disabled="!newBucketName.trim()">Add</button>
+          </div>
+          <div class="stack gap-1">
+            <button :class="['bucket-item', { active: activeBucket === null }]" @click="selectBucket(null)">All</button>
+            <div v-for="b in buckets" :key="b" class="bucket-row">
+              <!-- Rename mode -->
+              <div v-if="renamingBucket === b" class="row gap-1" style="flex: 1;">
+                <input type="text" v-model="renameBucketValue" style="flex: 1;" @keydown.enter="confirmRenameBucket(b)"
+                  @keydown.escape="renamingBucket = null">
+                <button class="primary" @click="confirmRenameBucket(b)" style="padding: 2px 6px;">OK</button>
+                <button class="ghost" @click="renamingBucket = null" style="padding: 2px 6px;">X</button>
+              </div>
+              <!-- Normal mode -->
+              <template v-else>
+                <button :class="['bucket-item', { active: activeBucket === b }]" @click="selectBucket(b)"
+                  style="flex: 1;">{{ b }}</button>
+                <div class="bucket-actions">
+                  <button class="ghost" @click="startRenameBucket(b)" title="Rename"
+                    style="padding: 2px 5px;">R</button>
+                  <button class="ghost danger-text" @click="clearBucket(b)" title="Clear"
+                    style="padding: 2px 5px;">X</button>
+                </div>
+              </template>
+            </div>
+          </div>
+          <p v-if="!buckets.length" class="muted">No buckets found</p>
+        </div>
+
+        <!-- Search panel -->
+        <div class="panel stack gap-2">
+          <p class="eyebrow">SEARCH</p>
+          <div class="field">
+            <input type="text" v-model="searchQuery" placeholder="Semantic search..." @keydown.enter="searchMemories">
+          </div>
+          <div class="row gap-1">
+            <button class="primary" @click="searchMemories" :disabled="!searchQuery.trim() || searching"
+              style="flex:1;">
+              {{ searching ? 'Searching...' : 'Search' }}
+            </button>
+            <button v-if="isSearchResult" class="ghost" @click="clearSearch">Clear</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main content: Memory list -->
+      <div class="stack gap-2">
+        <div class="row spread">
+          <p class="eyebrow">
+            {{ isSearchResult ? 'SEARCH RESULTS' : 'RECENT MEMORIES' }}
+            <span v-if="activeBucket" class="tag primary" style="margin-left: 8px;">{{ activeBucket }}</span>
+          </p>
+          <button v-if="!isSearchResult" class="ghost" @click="loadMemories" :disabled="loading">
+            {{ loading ? 'Loading...' : 'Refresh' }}
+          </button>
+        </div>
+
+        <div v-if="loading" class="empty">Loading memories...</div>
+        <div v-else-if="!memories.length" class="empty">No memories found.</div>
+
+        <div v-else class="timeline">
+          <div v-for="m in memories" :key="m.memory_id" class="timeline-entry">
+            <div class="timeline-meta">
+              <span class="tag">{{ m.bucket }}</span>
+              <span>{{ formatDate(m.created_at) }}</span>
+            </div>
+
+            <!-- Content: inline edit on double-click -->
+            <div v-if="editingId === m.memory_id" class="stack gap-2" style="margin: 6px 0;">
+              <textarea v-model="editContent" rows="3" class="edit-textarea" ref="editField"></textarea>
+              <div class="row gap-1">
+                <div class="field" style="flex-direction: row; align-items: center; gap: 5px;">
+                  <label style="text-transform: none;">Bucket:</label>
+                  <input type="text" v-model="editBucket" style="width: 120px;">
+                </div>
+                <div style="margin-left: auto;" class="row gap-1">
+                  <button class="ghost" @click="cancelEdit">Cancel</button>
+                  <button class="primary" @click="saveEdit(m)" :disabled="updatingId === m.memory_id">
+                    {{ updatingId === m.memory_id ? 'Saving...' : 'Save' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <p v-else @dblclick="startEdit(m)" class="memory-content" style="margin: 6px 0; white-space: pre-wrap;"
+              title="Double-click to edit">{{ m.content }}</p>
+
+            <!-- Footer: ID + actions -->
+            <div class="row spread" style="margin-top: 6px;">
+              <span class="muted codeish">{{ m.memory_id }}</span>
+              <div class="row gap-1">
+                <button class="ghost" @click="toggleConnections(m)" style="padding: 2px 8px;"
+                  :class="{ 'conn-active': expandedId === m.memory_id }">
+                  {{ (m.connected_nodes && m.connected_nodes.length) || 0 }} conn
+                </button>
+                <button class="ghost danger-text" @click="deleteMemory(m)" style="padding: 2px 8px;">Del</button>
+              </div>
+            </div>
+
+            <!-- Connections panel (expanded) -->
+            <div v-if="expandedId === m.memory_id" class="conn-panel">
+              <div class="row spread" style="margin-bottom: 8px;">
+                <p class="eyebrow">CONNECTIONS</p>
+              </div>
+
+              <!-- Existing edges -->
+              <div v-if="m.connected_nodes && m.connected_nodes.length" class="stack gap-1"
+                style="margin-bottom: 11px;">
+                <div v-for="(nodeId, idx) in m.connected_nodes" :key="nodeId + idx" class="edge">
+                  <span class="edge-arrow">-></span>
+                  <span class="codeish" style="flex: 1; overflow: hidden; text-overflow: ellipsis;">{{ nodeId }}</span>
+                  <span class="tag secondary">{{ m.relationship_types[idx] }}</span>
+                  <button class="ghost danger-text" @click="removeEdge(m, nodeId, m.relationship_types[idx])"
+                    style="padding: 0 4px;" title="Disconnect">x</button>
+                </div>
+              </div>
+              <p v-else class="muted" style="margin-bottom: 11px;">No outgoing connections.</p>
+
+              <!-- Add connection form -->
+              <div class="row gap-1">
+                <div class="field" style="flex-direction: row; align-items: center; gap: 5px;">
+                  <label style="text-transform: none;">UUID:</label>
+                  <input type="text" v-model="newEdge.targetId" style="flex: 2;">
+                </div>
+                <div class="field" style="flex-direction: row; align-items: center; gap: 5px;">
+                  <label style="text-transform: none;">Rel.:</label>
+                  <input type="text" v-model="newEdge.relType" style="flex: 1;">
+                </div>
+                <button class="primary" @click="addEdge(m)"
+                  :disabled="!newEdge.targetId.trim() || !newEdge.relType.trim()"
+                  style="padding: 5px 8px;">Link</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Error toast -->
+    <div v-if="error" class="notice error toast">
+      <span>{{ error }}</span>
+      <button class="ghost" @click="error = null" style="margin-left: auto;">Dismiss</button>
+    </div>
+
+    <!-- Success toast -->
+    <div v-if="success" class="notice success toast">
+      <span>{{ success }}</span>
+    </div>
+  </div>
+</div>
+{% endraw %}
+{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('static', path='/js/app/memory.js') }}"></script>
+{% endblock %}

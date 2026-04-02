@@ -41,6 +41,9 @@ __all__ = (
     "get_connected",
     "get_last_memories",
     "get_memory",
+    "list_namespaces",
+    "rename_bucket",
+    "update_memory",
 )
 
 _MEMORY_SCHEMA = pa.schema(
@@ -92,12 +95,13 @@ async def get_memory(
 
     vector_query = await table.search(embedding, query_type="vector")
 
+    where = f"namespace='{_sanitize(namespace, 'namespace')}'"
     if bucket is not None:
-        vector_query = vector_query.where(f"bucket='{_sanitize(bucket, 'bucket')}'")
+        where += f" AND bucket='{_sanitize(bucket, 'bucket')}'"
 
     results = (
         await vector_query
-        .where(f"namespace='{_sanitize(namespace, 'namespace')}'")
+        .where(where)
         .select(["memory_id", "content", "bucket", "connected_nodes", "relationship_types", "created_at"])
         .limit(top_k)
         .to_list()
@@ -118,15 +122,13 @@ async def get_last_memories(
 
     table = await _get_memory_table()
 
-    query = table.query()
-
+    where = f"namespace='{_sanitize(namespace, 'namespace')}'"
     if bucket is not None:
-        query = query.where(f"bucket='{_sanitize(bucket, 'bucket')}'")
-
-    query = query.where(f"namespace='{_sanitize(namespace, 'namespace')}'")
+        where += f" AND bucket='{_sanitize(bucket, 'bucket')}'"
 
     results = (
-        await query
+        await table.query()
+        .where(where)
         .select(["memory_id", "content", "bucket", "connected_nodes", "relationship_types", "created_at"])
         .to_list()
     )  # fmt: skip
@@ -177,9 +179,35 @@ async def delete_memory(
     memory_id: UUID,
     namespace: str = "default",
 ) -> None:
-    """Delete a memory entry from the vector store by its ID."""
+    """Delete a memory entry from the vector store by its ID.
+
+    Also removes any incoming edges from other memories that reference
+    this node in their ``connected_nodes`` lists.
+    """
 
     table = await _get_memory_table()
+    target_str = str(memory_id)
+
+    # Remove incoming edges: scan all rows in the namespace for references to this memory
+    all_rows = (
+        await table.query()
+        .where(f"namespace='{_sanitize(namespace, 'namespace')}'")
+        .select(["memory_id", "connected_nodes", "relationship_types"])
+        .to_list()
+    )  # fmt: skip
+
+    for row in all_rows:
+        nodes: list[str] = list(row.get("connected_nodes") or [])
+        if target_str not in nodes:
+            continue
+        rels: list[str] = list(row.get("relationship_types") or [])
+        new_nodes = [n for n, r in zip(nodes, rels, strict=True) if n != target_str]
+        new_rels = [r for n, r in zip(nodes, rels, strict=True) if n != target_str]
+        row_id = UUID(bytes=row["memory_id"])
+        await table.update(
+            updates={"connected_nodes": new_nodes, "relationship_types": new_rels},
+            where=f"memory_id=X'{row_id.hex}' AND namespace='{_sanitize(namespace, 'namespace')}'",
+        )
 
     await table.delete(f"memory_id=X'{memory_id.hex}' AND namespace='{_sanitize(namespace, 'namespace')}'")
 
@@ -362,3 +390,74 @@ async def buckets_list(
     )  # fmt: skip
 
     return {r["bucket"] for r in results}
+
+
+async def list_namespaces() -> set[str]:
+    """Retrieve the set of distinct namespaces that exist in the memory table."""
+
+    table = await _get_memory_table()
+    results = await table.query().select(["namespace"]).to_list()
+    return {r["namespace"] for r in results}
+
+
+async def update_memory(
+    memory_id: UUID,
+    namespace: str = "default",
+    content: str | None = None,
+    bucket: str | None = None,
+) -> None:
+    """Update a memory's content and/or bucket.
+
+    If *content* changes the embedding vector is regenerated.
+    """
+
+    table = await _get_memory_table()
+
+    updates: dict = {}
+
+    if content is not None:
+        updates["content"] = content
+        updates["vector"] = await get_embedding(content, mode="storage")
+
+    if bucket is not None:
+        updates["bucket"] = bucket
+
+    if not updates:
+        return
+
+    await table.update(
+        updates=updates,
+        where=f"memory_id=X'{memory_id.hex}' AND namespace='{_sanitize(namespace, 'namespace')}'",
+    )
+
+
+async def rename_bucket(
+    old_name: str,
+    new_name: str,
+    namespace: str = "default",
+) -> int:
+    """Rename a bucket by updating every memory that belongs to it.
+
+    Returns the number of memories affected.
+    """
+
+    table = await _get_memory_table()
+
+    rows = (
+        await table.query()
+        .where(
+            f"bucket='{_sanitize(old_name, 'bucket')}' AND namespace='{_sanitize(namespace, 'namespace')}'"
+        )
+        .select(["memory_id"])
+        .to_list()
+    )  # fmt: skip
+
+    if not rows:
+        return 0
+
+    await table.update(
+        updates={"bucket": new_name},
+        where=f"bucket='{_sanitize(old_name, 'bucket')}' AND namespace='{_sanitize(namespace, 'namespace')}'",
+    )
+
+    return len(rows)

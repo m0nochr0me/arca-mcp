@@ -1,0 +1,118 @@
+/* ── Memory dashboard ──────────────────────────────────────── */
+
+[v-cloak] {
+  display: none;
+}
+
+/* ── Bucket list ───────────────────────────────────────────── */
+
+.bucket-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 5px 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.bucket-item:hover {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.bucket-item.active {
+  color: var(--primary);
+  border-color: rgba(105, 240, 209, 0.28);
+  background: rgba(105, 240, 209, 0.08);
+}
+
+.bucket-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.bucket-actions {
+  display: none;
+  flex-shrink: 0;
+}
+
+.bucket-row:hover .bucket-actions {
+  display: flex;
+  gap: 1px;
+}
+
+/* ── Timeline overrides ────────────────────────────────────── */
+
+#memory-app .timeline {
+  max-height: none;
+}
+
+#memory-app .timeline-entry {
+  border-left-color: var(--primary);
+}
+
+#memory-app .timeline-entry:hover {
+  border-left-color: var(--secondary);
+}
+
+/* ── Inline content edit ───────────────────────────────────── */
+
+.memory-content {
+  cursor: default;
+  border: 1px solid transparent;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  transition: border-color 0.15s;
+}
+
+.memory-content:hover {
+  border-color: var(--border-dim);
+}
+
+.edit-textarea {
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  background: rgba(10, 15, 19, 0.84);
+  border: 1px solid rgba(105, 240, 209, 0.5);
+  color: var(--text);
+  padding: 8px 11px;
+  caret-color: var(--primary);
+  resize: vertical;
+  width: 100%;
+}
+
+.edit-textarea:focus {
+  outline: none;
+}
+
+/* ── Connection panel ──────────────────────────────────────── */
+
+.conn-panel {
+  margin-top: 11px;
+  padding-top: 11px;
+  border-top: 1px solid var(--border-dim);
+}
+
+.conn-active {
+  color: var(--tertiary) !important;
+}
+
+.conn-panel .edge {
+  padding: 4px 8px;
+}
+
+/* ── Toast notifications ───────────────────────────────────── */
+
+.toast {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 300;
+  max-width: 500px;
+}

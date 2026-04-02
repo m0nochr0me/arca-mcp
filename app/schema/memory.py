@@ -55,6 +55,15 @@ class MemorySearchResponse(BaseModel):
     results: list[MemorySearchResult]
 
 
+class MemoryUpdateRequest(BaseModel):
+    content: str | None = Field(default=None, description="New content (re-embeds if changed)")
+    bucket: str | None = Field(default=None, description="New bucket name")
+
+
+class MemoryUpdateResponse(BaseModel):
+    status: str
+
+
 class MemoryDeleteResponse(BaseModel):
     status: str
 
@@ -65,6 +74,20 @@ class MemoryClearResponse(BaseModel):
 
 class BucketListResponse(BaseModel):
     buckets: list[str]
+
+
+class NamespaceListResponse(BaseModel):
+    namespaces: list[str]
+
+
+class BucketRenameRequest(BaseModel):
+    old_name: str = Field(..., description="Current bucket name")
+    new_name: str = Field(..., description="New bucket name")
+
+
+class BucketRenameResponse(BaseModel):
+    status: str
+    count: int = Field(description="Number of memories moved")
 
 
 # ---- Knowledge-Graph edges ----

@@ -9,6 +9,8 @@ from time import perf_counter
 
 from asgi_correlation_id import CorrelationIdMiddleware
 from fastapi import FastAPI, Request, Response
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from fastmcp import FastMCP
 from fastmcp.server.auth.providers.debug import DebugTokenVerifier
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
@@ -43,6 +45,7 @@ mcp_server.add_provider(
         reload=False,
     )
 )
+
 
 @mcp_server.resource("resource://health_check")
 async def get_health() -> str:
@@ -94,8 +97,20 @@ app.add_middleware(
     validator=None,
 )
 
+templates = Jinja2Templates(directory=str(base_dir / "templates"))
+app.mount("/static", StaticFiles(directory=str(base_dir / "static")), name="static")
+
 app.include_router(memory_router)
 app.mount("/app", mcp_app)
+
+
+@app.get(
+    "/memory",
+    include_in_schema=False,
+)
+async def memory_dashboard(request: Request):
+    """Operator console for memory management."""
+    return templates.TemplateResponse(request, "memory.html", {"page_title": "Memory"})
 
 
 @app.get(

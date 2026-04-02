@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends, Query
 from app.api.deps import get_namespace, verify_token
 from app.schema.memory import (
     BucketListResponse,
+    BucketRenameRequest,
+    BucketRenameResponse,
     ConnectedResponse,
     ConnectedResult,
     ConnectRequest,
@@ -22,6 +24,9 @@ from app.schema.memory import (
     MemorySearchRequest,
     MemorySearchResponse,
     MemorySearchResult,
+    MemoryUpdateRequest,
+    MemoryUpdateResponse,
+    NamespaceListResponse,
 )
 from app.util.memory import (
     add_memory,
@@ -33,6 +38,9 @@ from app.util.memory import (
     get_connected,
     get_last_memories,
     get_memory,
+    list_namespaces,
+    rename_bucket,
+    update_memory,
 )
 
 router = APIRouter(
@@ -87,6 +95,20 @@ async def last_memories(
     )
 
 
+@router.patch(
+    "/memories/{memory_id}",
+    response_model=MemoryUpdateResponse,
+)
+async def patch_memory(
+    memory_id: UUID,
+    body: MemoryUpdateRequest,
+    namespace: str = Depends(get_namespace),
+) -> MemoryUpdateResponse:
+    """Update a memory's content and/or bucket."""
+    await update_memory(memory_id, namespace, content=body.content, bucket=body.bucket)
+    return MemoryUpdateResponse(status="Memory updated")
+
+
 @router.delete(
     "/memories/{memory_id}",
     response_model=MemoryDeleteResponse,
@@ -95,7 +117,7 @@ async def remove_memory(
     memory_id: UUID,
     namespace: str = Depends(get_namespace),
 ) -> MemoryDeleteResponse:
-    """Delete a specific memory by its UUID."""
+    """Delete a specific memory by its UUID. Cascade-disconnects incoming edges."""
     await delete_memory(memory_id, namespace)
     return MemoryDeleteResponse(status="Memory deleted")
 
@@ -126,6 +148,29 @@ async def list_buckets(
     """List all memory buckets in the namespace."""
     buckets = await buckets_list(namespace)
     return BucketListResponse(buckets=sorted(buckets))
+
+
+@router.post(
+    "/buckets/rename",
+    response_model=BucketRenameResponse,
+)
+async def rename_bucket_endpoint(
+    body: BucketRenameRequest,
+    namespace: str = Depends(get_namespace),
+) -> BucketRenameResponse:
+    """Rename a bucket by moving all its memories to a new bucket name."""
+    count = await rename_bucket(body.old_name, body.new_name, namespace)
+    return BucketRenameResponse(status="Bucket renamed", count=count)
+
+
+@router.get(
+    "/namespaces",
+    response_model=NamespaceListResponse,
+)
+async def list_namespaces_endpoint() -> NamespaceListResponse:
+    """List all namespaces that exist in the memory store."""
+    namespaces = await list_namespaces()
+    return NamespaceListResponse(namespaces=sorted(namespaces))
 
 
 # ---- Knowledge-graph endpoints ----
