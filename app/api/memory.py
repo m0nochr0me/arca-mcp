@@ -18,6 +18,8 @@ from app.schema.memory import (
     EdgeResponse,
     MemoryAddRequest,
     MemoryAddResponse,
+    MemoryBatchAddRequest,
+    MemoryBatchAddResponse,
     MemoryClearResponse,
     MemoryDeleteResponse,
     MemoryGetLastRequest,
@@ -29,6 +31,7 @@ from app.schema.memory import (
     NamespaceListResponse,
 )
 from app.util.memory import (
+    add_memories,
     add_memory,
     buckets_list,
     clear_memories,
@@ -61,6 +64,20 @@ async def create_memory(
     """Add content to memory storage."""
     memory_id = await add_memory(body.content, body.bucket, namespace, body.connected_nodes, body.relationship_types)
     return MemoryAddResponse(status="Memory added", memory_id=memory_id)
+
+
+@router.post(
+    "/memories/batch",
+    response_model=MemoryBatchAddResponse,
+)
+async def create_memories_batch(
+    body: MemoryBatchAddRequest,
+    namespace: str = Depends(get_namespace),
+) -> MemoryBatchAddResponse:
+    """Add multiple memories in a single batch (max 100)."""
+    items = [item.model_dump() for item in body.items]
+    memory_ids = await add_memories(items, namespace)
+    return MemoryBatchAddResponse(status="Memories added", memory_ids=memory_ids)
 
 
 @router.post(

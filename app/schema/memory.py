@@ -34,6 +34,30 @@ class MemoryGetLastRequest(BaseModel):
     bucket: str | None = Field(default=None, description="Optional bucket name")
 
 
+class MemoryBatchAddItem(BaseModel):
+    content: str = Field(..., description="Content to store in memory")
+    bucket: str | None = Field(default=None, description="Optional bucket name")
+    connected_nodes: list[str] | None = Field(
+        default=None,
+        description="Optional list of memory UUIDs this node connects to",
+    )
+    relationship_types: list[str] | None = Field(
+        default=None,
+        description="Parallel list of relationship labels (same length as connected_nodes)",
+    )
+
+
+class MemoryBatchAddRequest(BaseModel):
+    items: list[MemoryBatchAddItem] = Field(
+        ..., min_length=1, max_length=100, description="List of memories to add (max 100)"
+    )
+
+
+class MemoryBatchAddResponse(BaseModel):
+    status: str
+    memory_ids: list[UUID]
+
+
 class MemoryAddResponse(BaseModel):
     status: str
     memory_id: UUID

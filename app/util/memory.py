@@ -32,6 +32,7 @@ def _sanitize_uuid(value: str) -> str:
 
 
 __all__ = (
+    "add_memories",
     "add_memory",
     "buckets_list",
     "clear_memories",
@@ -173,6 +174,55 @@ async def add_memory(
     await table.add([data], mode="append")
 
     return memory_id
+
+
+async def add_memories(
+    items: list[dict],
+    namespace: str = "default",
+) -> list[UUID]:
+    """Add multiple memories in a single batch.
+
+    Each item in *items* must have a ``content`` key and optionally ``bucket``,
+    ``connected_nodes``, and ``relationship_types``.
+
+    Embeddings are generated in a single batched API call for efficiency.
+    """
+
+    if not items:
+        return []
+
+    # Validate connected_nodes / relationship_types lengths
+    for i, item in enumerate(items):
+        nodes = item.get("connected_nodes") or []
+        rels = item.get("relationship_types") or []
+        if len(nodes) != len(rels):
+            raise ValueError(f"Item {i}: connected_nodes and relationship_types must have the same length")
+
+    contents = [item["content"] for item in items]
+    embeddings = await get_embedding(contents, mode="storage")
+
+    table = await _get_memory_table()
+    now = datetime.now(UTC)
+    ids: list[UUID] = []
+    rows: list[dict] = []
+
+    for item, embedding in zip(items, embeddings, strict=True):
+        memory_id = uuid4()
+        ids.append(memory_id)
+        rows.append({
+            "memory_id": memory_id.bytes,
+            "content": item["content"],
+            "bucket": item.get("bucket") or "default",
+            "namespace": namespace,
+            "connected_nodes": item.get("connected_nodes") or [],
+            "relationship_types": item.get("relationship_types") or [],
+            "vector": embedding,
+            "created_at": now,
+        })
+
+    await table.add(rows, mode="append")
+
+    return ids
 
 
 async def delete_memory(
