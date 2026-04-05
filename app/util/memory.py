@@ -203,9 +203,9 @@ async def delete_memory(
         rels: list[str] = list(row.get("relationship_types") or [])
         new_nodes = [n for n, r in zip(nodes, rels, strict=True) if n != target_str]
         new_rels = [r for n, r in zip(nodes, rels, strict=True) if n != target_str]
-        row_id = UUID(bytes=row["memory_id"])
+        row_id = row["memory_id"] if isinstance(row["memory_id"], UUID) else UUID(bytes=row["memory_id"])
         await table.update(
-            updates={"connected_nodes": new_nodes, "relationship_types": new_rels},
+            updates={"connected_nodes": new_nodes or None, "relationship_types": new_rels or None},
             where=f"memory_id=X'{row_id.hex}' AND namespace='{_sanitize(namespace, 'namespace')}'",
         )
 
@@ -305,7 +305,7 @@ async def disconnect_memories(
         new_rels.append(rel)
 
     await table.update(
-        updates={"connected_nodes": new_nodes, "relationship_types": new_rels},
+        updates={"connected_nodes": new_nodes or None, "relationship_types": new_rels or None},
         where=f"memory_id=X'{source_id.hex}' AND namespace='{_sanitize(namespace, 'namespace')}'",
     )
 
