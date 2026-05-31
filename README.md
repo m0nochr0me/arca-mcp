@@ -6,8 +6,10 @@ A Model Context Protocol (MCP) server providing semantic memory storage and retr
 
 - **Semantic Search** — Store and retrieve memories using natural language queries powered by vector similarity search
 - **Dual Access** — MCP tools for AI agents + REST API for programmatic integrations
+- **Knowledge Graph** — Connect memories with directed, labelled edges and traverse them
 - **Multi-Tenant Isolation** — Namespace-scoped operations via `X-Namespace` HTTP header
 - **Bucket Organization** — Group memories into logical buckets for structured storage
+- **JSON Canvas Export** — Render a bucket's memories and connections as a [JSON Canvas](https://jsoncanvas.org/) document
 - **Embedding Caching** — Redis-backed cache for generated embeddings to minimize API calls
 - **Bearer Token Auth** — Constant-time token verification for secure access
 
@@ -28,244 +30,17 @@ cd arca-mcp
 # Install dependencies
 uv sync --locked
 
-# Configure environment
-cp .env.example .env
-# Edit .env with your ARCA_GOOGLE_API_KEY and ARCA_APP_AUTH_KEY
+# Configure environment — create a .env with at least the required secrets
+cat > .env <<'EOF'
+ARCA_APP_AUTH_KEY=your-secret-bearer-token
+ARCA_GOOGLE_API_KEY=your-google-api-key
+EOF
 
 # Run the server
 python -m app
 ```
 
-The server starts on `http://0.0.0.0:4201` by default, with MCP available at `/app/mcp` and REST API at `/v1`.
-
-## Configuration
-
-All settings are configured via environment variables with the `ARCA_` prefix, or through a `.env` file.
-
-| Variable | Type | Default | Description |
-| - | - | - | - |
-| `ARCA_APP_HOST` | `str` | `0.0.0.0` | Server bind address |
-| `ARCA_APP_PORT` | `int` | `4201` | Server port |
-| `ARCA_APP_WORKERS` | `int` | `1` | Uvicorn worker count |
-| `ARCA_APP_AUTH_KEY` | `str` | **required** | Bearer token for MCP authentication |
-| `ARCA_TRANSPORT` | `str` | `streamable-http` | MCP transport (`stdio`, `http`, `sse`, `streamable-http`) |
-| `ARCA_DEBUG` | `bool` | `false` | Enable debug mode |
-| `ARCA_LOG_MESSAGE_MAX_LEN` | `int` | `2000` | Maximum log message length |
-| `ARCA_GOOGLE_API_KEY` | `str` | **required** | Google API key for Gemini embeddings |
-| `ARCA_EMBEDDING_MODEL` | `str` | `gemini-embedding-001` | Gemini embedding model name |
-| `ARCA_EMBEDDING_DIMENSION` | `int` | `3072` | Embedding vector dimensionality |
-| `ARCA_VECTOR_STORE_PATH` | `str` | `./lancedb` | LanceDB storage directory |
-| `ARCA_REDIS_HOST` | `str` | `localhost` | Redis host |
-| `ARCA_REDIS_PORT` | `int` | `6379` | Redis port |
-| `ARCA_REDIS_DB_CACHE` | `int` | `4` | Redis database number for cache |
-| `ARCA_REDIS_PASSWORD` | `str` | `null` | Redis password (optional) |
-| `ARCA_CACHE_TTL` | `int` | `3600` | Default cache TTL in seconds (1 hour) |
-| `ARCA_CACHE_TTL_LONG` | `int` | `604800` | Long cache TTL in seconds (7 days, used for embeddings) |
-
-## MCP Tools
-
-All tools are mounted under the `memory` namespace. Operations are scoped to the namespace provided via the `X-namespace` HTTP header (defaults to `"default"`).
-
-### `memory/add`
-
-Store content in memory with a vector embedding.
-
-| Parameter | Type | Required | Description |
-| - | - | - | - |
-| `content` | `str` | yes | Content to store |
-| `bucket` | `str \| null` | no | Bucket name (defaults to `"default"`) |
-| `connected_nodes` | `list[str] \| null` | no | UUIDs of nodes to link at creation time |
-| `relationship_types` | `list[str] \| null` | no | Parallel relationship labels for `connected_nodes` |
-
-**Returns:** `{ "status": "Memory added", "memory_id": "<uuid>" }`
-
-### `memory/get`
-
-Retrieve memories via semantic similarity search.
-
-| Parameter | Type | Required | Description |
-| - | - | - | - |
-| `query` | `str` | yes | Natural language search query |
-| `bucket` | `str \| null` | no | Filter by bucket |
-| `top_k` | `int` | no | Number of results (default: `5`) |
-
-**Returns:** `{ "status": "Memory retrieved", "results": [...] }`
-
-### `memory/delete`
-
-Delete a specific memory by its UUID.
-
-| Parameter | Type | Required | Description |
-| - | - | - | - |
-| `memory_id` | `str` | yes | UUID of the memory to delete |
-
-**Returns:** `{ "status": "Memory deleted" }`
-
-### `memory/clear`
-
-Clear all memories in a bucket.
-
-| Parameter | Type | Required | Description |
-| - | - | - | - |
-| `bucket` | `str \| null` | no | Bucket to clear (defaults to `"default"`) |
-
-**Returns:** `{ "status": "Memories cleared" }`
-
-### `memory/list_buckets`
-
-List all buckets in the current namespace.
-
-**Parameters:** None
-
-**Returns:** `{ "buckets": ["default", "work", ...] }`
-
-### `memory/connect`
-
-Create a directed edge between two memory nodes.
-
-| Parameter | Type | Required | Description |
-| - | - | - | - |
-| `source_id` | `str` | yes | UUID of the source node |
-| `target_id` | `str` | yes | UUID of the target node |
-| `relationship_type` | `str` | yes | Edge label (e.g. `"related_to"`, `"depends_on"`) |
-
-**Returns:** `{ "status": "Memories connected" }`
-
-### `memory/disconnect`
-
-Remove one or all directed edges between two nodes.
-
-| Parameter | Type | Required | Description |
-| - | - | - | - |
-| `source_id` | `str` | yes | UUID of the source node |
-| `target_id` | `str` | yes | UUID of the target node |
-| `relationship_type` | `str \| null` | no | If provided, only remove this edge label; otherwise remove all edges |
-
-**Returns:** `{ "status": "Memories disconnected" }`
-
-### `memory/traverse`
-
-Traverse the knowledge graph starting from a node.
-
-| Parameter | Type | Required | Description |
-| - | - | - | - |
-| `memory_id` | `str` | yes | UUID of the starting node |
-| `relationship_type` | `str \| null` | no | Filter traversal to this edge label |
-| `depth` | `int` | no | Number of hops (default: `1`) |
-
-**Returns:** `{ "status": "Graph traversed", "results": [...] }` — each result includes a `_depth` field.
-
-## REST API
-
-All REST endpoints are under `/v1`, require a `Authorization: Bearer <token>` header, and accept an optional `X-Namespace` header (defaults to `"default"`).
-
-Interactive API docs are available at `/docs` when the server is running.
-
-| Method | Path | Description |
-| - | - | - |
-| `POST` | `/v1/memories` | Add a memory |
-| `POST` | `/v1/memories/search` | Semantic similarity search |
-| `DELETE` | `/v1/memories/{memory_id}` | Delete a specific memory |
-| `DELETE` | `/v1/memories?bucket=...` | Clear memories in a bucket |
-| `GET` | `/v1/buckets` | List all buckets |
-| `POST` | `/v1/memories/connect` | Create a directed edge between two nodes |
-| `POST` | `/v1/memories/disconnect` | Remove edges between two nodes |
-| `GET` | `/v1/memories/{memory_id}/connected` | Traverse the knowledge graph from a node |
-
-### Examples
-
-All examples assume the server is running at `localhost:4201`. Replace `$TOKEN` with your `ARCA_APP_AUTH_KEY`.
-
-#### Add a memory
-
-```bash
-curl -X POST http://localhost:4201/v1/memories \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "X-Namespace: my_project" \
-  -H "Content-Type: application/json" \
-  -d '{"content": "User prefers dark mode", "bucket": "preferences"}'
-```
-
-```json
-{
-  "status": "Memory added",
-  "memory_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-}
-```
-
-#### Search memories
-
-```bash
-curl -X POST http://localhost:4201/v1/memories/search \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "X-Namespace: my_project" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "what theme does the user like?", "top_k": 3}'
-```
-
-```json
-{
-  "status": "Memory retrieved",
-  "results": [
-    {
-      "memory_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "content": "User prefers dark mode",
-      "bucket": "preferences"
-    }
-  ]
-}
-```
-
-#### Delete a memory
-
-```bash
-curl -X DELETE http://localhost:4201/v1/memories/a1b2c3d4-e5f6-7890-abcd-ef1234567890 \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "X-Namespace: my_project"
-```
-
-```json
-{
-  "status": "Memory deleted"
-}
-```
-
-#### Clear a bucket
-
-```bash
-curl -X DELETE "http://localhost:4201/v1/memories?bucket=preferences" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "X-Namespace: my_project"
-```
-
-```json
-{
-  "status": "Memories cleared"
-}
-```
-
-#### List buckets
-
-```bash
-curl http://localhost:4201/v1/buckets \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "X-Namespace: my_project"
-```
-
-```json
-{
-  "buckets": ["default", "preferences", "work"]
-}
-```
-
-## Other Endpoints
-
-| Method | Path | Description |
-| - | - | - |
-| `GET` | `/` | Index — returns `{ "message": "OK" }` |
-| `GET` | `/health` | Health check — returns status, version, uptime, exec ID |
-| `GET` | `/docs` | Interactive OpenAPI documentation |
-| `*` | `/app/mcp` | MCP streamable-http endpoint |
+The server starts on `http://0.0.0.0:4201` by default, with the MCP interface at `/app/mcp` and the REST API at `/v1`. See [Configuration](doc/configuration.md) for all available settings.
 
 ## Docker
 
@@ -281,7 +56,7 @@ docker run -p 4201:4201 \
   arca-mcp
 ```
 
-The Docker image uses Python 3.14 slim with UV for dependency management.
+The Docker image uses Python 3.14 slim with UV for dependency management. Mount a volume at `ARCA_VECTOR_STORE_PATH` (default `./lancedb`) to persist data across container restarts.
 
 ## MCP Client Configuration
 
@@ -302,48 +77,17 @@ Example `.mcp.json` for connecting an MCP client (e.g., Claude Code):
 }
 ```
 
-## Architecture
+`<your-auth-key>` must match `ARCA_APP_AUTH_KEY`. The `X-namespace` header scopes all operations to a tenant (defaults to `"default"` if omitted).
 
-```text
-              ┌─ /app/mcp → FastMCP Auth → MCP Tool Handler  ─┐
-Request → FastAPI                                             ├→ Gemini Embedding (Redis cache) → LanceDB
-              └─ /v1/*    → Bearer Auth  → REST Router ───────┘
-                                  ↑
-                        X-Namespace header (multi-tenancy)
-```
+## Documentation
 
-### Module Layout
+In-depth reference material lives in [`doc/`](doc/):
 
-```text
-app/
-├── __main__.py          # Uvicorn entry point
-├── main.py              # FastAPI app, lifespan, MCP mount, REST router
-├── api/
-│   ├── deps.py          # Shared dependencies (auth, namespace extraction)
-│   └── memory.py        # REST API router for memory operations
-├── context/
-│   └── memory.py        # MCP tool definitions (add, get, delete, clear, list_buckets)
-├── core/
-│   ├── config.py        # Pydantic BaseSettings with ARCA_ env prefix
-│   ├── db.py            # LanceDB async connection management
-│   ├── cache.py         # Redis cache wrapper
-│   ├── ai.py            # Google Gemini AI client
-│   └── log.py           # Loguru logging configuration
-├── schema/
-│   ├── memory.py        # REST API request/response models
-│   └── status.py        # Response models (HealthCheckResponse, IndexResponse)
-└── util/
-    ├── embeds.py         # Embedding generation with Redis caching
-    └── memory.py         # Core memory CRUD against LanceDB (PyArrow schema)
-```
+- **[Configuration](doc/configuration.md)** — all `ARCA_` environment variables and their defaults
+- **[MCP Tools](doc/mcp-tools.md)** — the `memory/*` tool reference (add, get, graph traversal, …)
+- **[REST API](doc/rest-api.md)** — `/v1/*` endpoint reference with `curl` examples
+- **[Architecture](doc/architecture.md)** — request flow, module layout, key patterns, tech stack
 
-## Tech Stack
+## License
 
-- **[FastAPI](https://fastapi.tiangolo.com/)** — ASGI web framework
-- **[FastMCP](https://github.com/jlowin/fastmcp)** — Model Context Protocol server framework
-- **[LanceDB](https://lancedb.com/)** — Serverless vector database
-- **[Google Gemini](https://ai.google.dev/)** — Embedding generation (`gemini-embedding-001`)
-- **[Redis](https://redis.io/)** — Embedding cache layer
-- **[Pydantic](https://docs.pydantic.dev/)** — Settings and data validation
-- **[UV](https://docs.astral.sh/uv/)** — Python package manager
-- **[Loguru](https://github.com/Delgan/loguru)** — Logging
+See [LICENSE](LICENSE).
