@@ -22,7 +22,7 @@ A Model Context Protocol (MCP) server providing semantic memory storage and retr
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/arca-mcp.git
+git clone https://github.com/m0nochr0me/arca-mcp.git
 cd arca-mcp
 
 # Install dependencies
