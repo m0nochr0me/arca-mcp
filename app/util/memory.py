@@ -83,6 +83,23 @@ async def _get_memory_table() -> AsyncTable:
     return memory_table
 
 
+async def _update_edges(table: AsyncTable, where: str, nodes: list[str], rels: list[str]) -> None:
+    """Write the parallel edge lists (``connected_nodes`` / ``relationship_types``) for a row.
+
+    LanceDB cannot assign a bare empty Python list to a ``list<string>`` column: it
+    serialises to an untyped SQL ``[]`` and fails with "concat requires input of at least
+    one array". When the lists are empty we emit a typed empty array via ``make_array()``
+    instead; otherwise the values are passed through normally (LanceDB handles escaping).
+    """
+    if nodes:
+        await table.update(updates={"connected_nodes": nodes, "relationship_types": rels}, where=where)
+    else:
+        await table.update(
+            updates_sql={"connected_nodes": "make_array()", "relationship_types": "make_array()"},
+            where=where,
+        )
+
+
 async def get_memory(
     query: str,
     bucket: str | None = None,
@@ -115,10 +132,15 @@ async def get_last_memories(
     n: int = 5,
     bucket: str | None = None,
     namespace: str = "default",
-) -> list[dict]:
-    """Retrieve the last *n* memories ordered by creation time (most recent first).
+    offset: int = 0,
+) -> tuple[list[dict], int]:
+    """Retrieve a page of memories ordered by creation time (most recent first).
 
-    Memories without a ``created_at`` timestamp (pre-migration rows) are sorted last.
+    Skips *offset* of the most recent memories, then returns the next *n*. Memories
+    without a ``created_at`` timestamp (pre-migration rows) are sorted last.
+
+    Returns a ``(page, total)`` tuple where *total* is the number of memories matching
+    the namespace/bucket filter, ignoring pagination.
     """
 
     table = await _get_memory_table()
@@ -137,7 +159,7 @@ async def get_last_memories(
     # Most recent first; pre-migration rows without created_at sort last
     results.sort(key=lambda r: r.get("created_at") or datetime.min.replace(tzinfo=UTC), reverse=True)
 
-    return results[:n]
+    return results[offset : offset + n], len(results)
 
 
 async def add_memory(
@@ -256,9 +278,11 @@ async def delete_memory(
         new_nodes = [n for n, r in zip(nodes, rels, strict=True) if n != target_str]
         new_rels = [r for n, r in zip(nodes, rels, strict=True) if n != target_str]
         row_id = row["memory_id"] if isinstance(row["memory_id"], UUID) else UUID(bytes=row["memory_id"])
-        await table.update(
-            updates={"connected_nodes": new_nodes, "relationship_types": new_rels},
-            where=f"memory_id=X'{row_id.hex}' AND namespace='{_sanitize(namespace, 'namespace')}'",
+        await _update_edges(
+            table,
+            f"memory_id=X'{row_id.hex}' AND namespace='{_sanitize(namespace, 'namespace')}'",
+            new_nodes,
+            new_rels,
         )
 
     await table.delete(f"memory_id=X'{memory_id.hex}' AND namespace='{_sanitize(namespace, 'namespace')}'")
@@ -356,9 +380,11 @@ async def disconnect_memories(
         new_nodes.append(node)
         new_rels.append(rel)
 
-    await table.update(
-        updates={"connected_nodes": new_nodes, "relationship_types": new_rels},
-        where=f"memory_id=X'{source_id.hex}' AND namespace='{_sanitize(namespace, 'namespace')}'",
+    await _update_edges(
+        table,
+        f"memory_id=X'{source_id.hex}' AND namespace='{_sanitize(namespace, 'namespace')}'",
+        new_nodes,
+        new_rels,
     )
 
 

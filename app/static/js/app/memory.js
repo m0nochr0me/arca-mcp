@@ -1,5 +1,5 @@
 document.addEventListener("DOMContentLoaded", () => {
-  const { createApp, ref, onMounted, nextTick } = Vue;
+  const { createApp, ref, computed, onMounted, nextTick } = Vue;
 
   createApp({
     setup() {
@@ -16,6 +16,15 @@ document.addEventListener("DOMContentLoaded", () => {
       const memories = ref([]);
       const isSearchResult = ref(false);
       const searchQuery = ref("");
+
+      // ── Pagination (recent memories list) ──────────────────
+      const page = ref(0);
+      const pageSize = ref(50);
+      const total = ref(0);
+      const pageStart = computed(() => (total.value === 0 ? 0 : page.value * pageSize.value + 1));
+      const pageEnd = computed(() => Math.min((page.value + 1) * pageSize.value, total.value));
+      const hasPrevPage = computed(() => page.value > 0);
+      const hasNextPage = computed(() => (page.value + 1) * pageSize.value < total.value);
 
       // ── Add memory ─────────────────────────────────────────
       const showAddForm = ref(false);
@@ -163,6 +172,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       function selectBucket(b) {
         activeBucket.value = b;
+        page.value = 0;
         if (isSearchResult.value) {
           searchMemories();
         } else {
@@ -176,15 +186,33 @@ document.addEventListener("DOMContentLoaded", () => {
         loading.value = true;
         isSearchResult.value = false;
         try {
-          const body = { n: 50 };
+          const body = { n: pageSize.value, offset: page.value * pageSize.value };
           if (activeBucket.value) body.bucket = activeBucket.value;
           const data = await api("POST", "/memories/last", body);
           memories.value = data.results || [];
+          total.value = data.total ?? memories.value.length;
         } catch (e) {
           showError("Failed to load memories: " + e.message);
         } finally {
           loading.value = false;
         }
+      }
+
+      function nextPage() {
+        if (!hasNextPage.value) return;
+        page.value++;
+        loadMemories();
+      }
+
+      function prevPage() {
+        if (!hasPrevPage.value) return;
+        page.value--;
+        loadMemories();
+      }
+
+      function changePageSize() {
+        page.value = 0;
+        loadMemories();
       }
 
       async function searchMemories() {
@@ -206,6 +234,7 @@ document.addEventListener("DOMContentLoaded", () => {
       function clearSearch() {
         searchQuery.value = "";
         isSearchResult.value = false;
+        page.value = 0;
         loadMemories();
       }
 
@@ -239,7 +268,13 @@ document.addEventListener("DOMContentLoaded", () => {
           await api("DELETE", `/memories/${m.memory_id}`);
           memories.value = memories.value.filter(x => x.memory_id !== m.memory_id);
           if (expandedId.value === m.memory_id) expandedId.value = null;
+          if (total.value > 0) total.value--;
           flash("Memory deleted");
+          // If we emptied a non-first page, step back so the list isn't blank.
+          if (!isSearchResult.value && !memories.value.length && page.value > 0) {
+            page.value--;
+            loadMemories();
+          }
           loadBuckets();
         } catch (e) {
           showError("Delete failed: " + e.message);
@@ -352,6 +387,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       async function reload() {
         localStorage.setItem("arca_namespace", namespace.value || "default");
+        page.value = 0;
         await loadNamespaces();
         await loadBuckets();
         await loadMemories();
@@ -379,6 +415,9 @@ document.addEventListener("DOMContentLoaded", () => {
         // Data
         buckets, activeBucket, memories,
         isSearchResult, searchQuery,
+        // Pagination
+        page, pageSize, total, pageStart, pageEnd, hasPrevPage, hasNextPage,
+        nextPage, prevPage, changePageSize,
         // Add memory
         showAddForm, newMemory, saving,
         addMemory,

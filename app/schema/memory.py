@@ -39,6 +39,7 @@ class MemorySearchRequest(BaseModel):
 
 class MemoryGetLastRequest(BaseModel):
     n: int = Field(default=5, ge=1, le=100, description="Number of recent memories to return")
+    offset: int = Field(default=0, ge=0, description="Number of most-recent memories to skip (pagination)")
     bucket: str | None = Field(default=None, description="Optional bucket name")
 
 
@@ -85,6 +86,14 @@ class MemorySearchResult(BaseModel):
 class MemorySearchResponse(BaseModel):
     status: str
     results: list[MemorySearchResult]
+
+
+class MemoryListResponse(BaseModel):
+    status: str
+    results: list[MemorySearchResult]
+    total: int = Field(description="Total memories matching the filter, ignoring pagination")
+    offset: int = Field(description="Offset of this page (most-recent memories skipped)")
+    limit: int = Field(description="Maximum number of memories in this page")
 
 
 class MemoryUpdateRequest(BaseModel):

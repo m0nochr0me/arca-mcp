@@ -23,6 +23,7 @@ from app.schema.memory import (
     MemoryClearResponse,
     MemoryDeleteResponse,
     MemoryGetLastRequest,
+    MemoryListResponse,
     MemorySearchRequest,
     MemorySearchResponse,
     MemorySearchResult,
@@ -98,17 +99,20 @@ async def search_memories(
 
 @router.post(
     "/memories/last",
-    response_model=MemorySearchResponse,
+    response_model=MemoryListResponse,
 )
 async def last_memories(
     body: MemoryGetLastRequest,
     namespace: str = Depends(get_namespace),
-) -> MemorySearchResponse:
-    """Retrieve the most recent memories ordered by creation time."""
-    results = await get_last_memories(body.n, body.bucket, namespace)
-    return MemorySearchResponse(
+) -> MemoryListResponse:
+    """Retrieve a page of the most recent memories ordered by creation time."""
+    results, total = await get_last_memories(body.n, body.bucket, namespace, body.offset)
+    return MemoryListResponse(
         status="Memory retrieved" if results else "No memory found",
         results=[MemorySearchResult.model_validate(r) for r in results],
+        total=total,
+        offset=body.offset,
+        limit=body.n,
     )
 
 

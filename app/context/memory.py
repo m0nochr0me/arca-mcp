@@ -100,7 +100,7 @@ async def get_last(
         dict[str, Any]: The retrieved memory items.
     """
     namespace = _get_namespace()
-    results = await get_last_memories(n, bucket, namespace)
+    results, _ = await get_last_memories(n, bucket, namespace)
 
     return {
         "status": "Memory retrieved" if results else "No memory found",

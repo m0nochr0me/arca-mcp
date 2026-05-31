@@ -225,6 +225,25 @@
             </div>
           </div>
         </div>
+
+        <!-- Pagination (recent memories only) -->
+        <div v-if="!isSearchResult && total > 0" class="row spread" style="margin-top: 4px;">
+          <div class="row gap-1">
+            <button class="ghost" @click="prevPage" :disabled="!hasPrevPage || loading">Prev</button>
+            <button class="ghost" @click="nextPage" :disabled="!hasNextPage || loading">Next</button>
+          </div>
+          <div class="row gap-2" style="align-items: center;">
+            <span class="muted codeish">{{ pageStart }}-{{ pageEnd }} of {{ total }}</span>
+            <div class="field" style="flex-direction: row; align-items: center; gap: 6px;">
+              <label style="text-transform: none;">Per page:</label>
+              <select v-model.number="pageSize" @change="changePageSize" style="width: 64px;">
+                <option :value="25">25</option>
+                <option :value="50">50</option>
+                <option :value="100">100</option>
+              </select>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
