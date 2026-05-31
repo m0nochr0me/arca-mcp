@@ -3,9 +3,17 @@ Request and response models for the Memory REST API.
 """
 
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+
+
+def _none_to_empty_list(v: object) -> object:
+    return [] if v is None else v
+
+
+StrList = Annotated[list[str], BeforeValidator(_none_to_empty_list)]
 
 # ---- Memory CRUD ----
 
@@ -67,8 +75,8 @@ class MemorySearchResult(BaseModel):
     memory_id: UUID
     content: str
     bucket: str
-    connected_nodes: list[str] = Field(default_factory=list)
-    relationship_types: list[str] = Field(default_factory=list)
+    connected_nodes: StrList = Field(default_factory=list)
+    relationship_types: StrList = Field(default_factory=list)
     created_at: datetime | None = None
 
     model_config = ConfigDict(extra="ignore")
@@ -136,8 +144,8 @@ class ConnectedResult(BaseModel):
     memory_id: UUID
     content: str
     bucket: str
-    connected_nodes: list[str] = Field(default_factory=list)
-    relationship_types: list[str] = Field(default_factory=list)
+    connected_nodes: StrList = Field(default_factory=list)
+    relationship_types: StrList = Field(default_factory=list)
     created_at: datetime | None = None
     depth: int = Field(alias="_depth")
 

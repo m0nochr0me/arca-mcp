@@ -209,16 +209,18 @@ async def add_memories(
     for item, embedding in zip(items, embeddings, strict=True):
         memory_id = uuid4()
         ids.append(memory_id)
-        rows.append({
-            "memory_id": memory_id.bytes,
-            "content": item["content"],
-            "bucket": item.get("bucket") or "default",
-            "namespace": namespace,
-            "connected_nodes": item.get("connected_nodes") or [],
-            "relationship_types": item.get("relationship_types") or [],
-            "vector": embedding,
-            "created_at": now,
-        })
+        rows.append(
+            {
+                "memory_id": memory_id.bytes,
+                "content": item["content"],
+                "bucket": item.get("bucket") or "default",
+                "namespace": namespace,
+                "connected_nodes": item.get("connected_nodes") or [],
+                "relationship_types": item.get("relationship_types") or [],
+                "vector": embedding,
+                "created_at": now,
+            }
+        )
 
     await table.add(rows, mode="append")
 
@@ -255,7 +257,7 @@ async def delete_memory(
         new_rels = [r for n, r in zip(nodes, rels, strict=True) if n != target_str]
         row_id = row["memory_id"] if isinstance(row["memory_id"], UUID) else UUID(bytes=row["memory_id"])
         await table.update(
-            updates={"connected_nodes": new_nodes or None, "relationship_types": new_rels or None},
+            updates={"connected_nodes": new_nodes, "relationship_types": new_rels},
             where=f"memory_id=X'{row_id.hex}' AND namespace='{_sanitize(namespace, 'namespace')}'",
         )
 
@@ -355,7 +357,7 @@ async def disconnect_memories(
         new_rels.append(rel)
 
     await table.update(
-        updates={"connected_nodes": new_nodes or None, "relationship_types": new_rels or None},
+        updates={"connected_nodes": new_nodes, "relationship_types": new_rels},
         where=f"memory_id=X'{source_id.hex}' AND namespace='{_sanitize(namespace, 'namespace')}'",
     )
 
