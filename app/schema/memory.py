@@ -41,6 +41,7 @@ class MemoryGetLastRequest(BaseModel):
     n: int = Field(default=5, ge=1, le=100, description="Number of recent memories to return")
     offset: int = Field(default=0, ge=0, description="Number of most-recent memories to skip (pagination)")
     bucket: str | None = Field(default=None, description="Optional bucket name")
+    all: bool = Field(default=False, description="Return all matching memories, ignoring n/offset (use sparingly)")
 
 
 class MemoryBatchAddItem(BaseModel):

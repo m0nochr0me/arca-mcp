@@ -1,0 +1,426 @@
+/* ── Canvas view ───────────────────────────────────────────── */
+
+[v-cloak] {
+  display: none;
+}
+
+#canvas-app textarea {
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 17px;
+  background: rgba(10, 15, 19, 0.84);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 11px;
+  caret-color: var(--primary);
+  resize: vertical;
+  width: 100%;
+}
+
+#canvas-app textarea:focus,
+#canvas-app input:focus {
+  outline: none;
+  border-color: rgba(105, 240, 209, 0.5);
+}
+
+/* ── Surface ───────────────────────────────────────────────── */
+
+.canvas-wrap {
+  position: relative;
+  width: 100%;
+  height: calc(100vh - 160px);
+  min-height: 320px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(rgba(127, 216, 255, 0.04) 1px, transparent 1px) 0 0 / 22px 22px,
+    linear-gradient(90deg, rgba(127, 216, 255, 0.04) 1px, transparent 1px) 0 0 / 22px 22px,
+    var(--surface-dim);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.canvas-wrap.grabbing {
+  cursor: grabbing;
+}
+
+.canvas-wrap.linking {
+  cursor: crosshair;
+}
+
+/* Full-viewport-width mode (Maximize toggle) */
+.canvas-max {
+  position: relative;
+  width: 100vw;
+  left: 50%;
+  right: 50%;
+  margin-left: -50vw;
+  margin-right: -50vw;
+  padding: 0 22px;
+}
+
+/* ── Layers ────────────────────────────────────────────────── */
+
+.edge-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.node-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+/* ── Edges ─────────────────────────────────────────────────── */
+
+#arrow path {
+  fill: var(--tertiary);
+}
+
+#arrow-ext path {
+  fill: var(--secondary);
+}
+
+.cedge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.cedge-line {
+  fill: none;
+  stroke: var(--tertiary);
+  stroke-width: 1.5;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.cedge.external .cedge-line {
+  stroke: var(--secondary);
+  stroke-dasharray: 5 4;
+}
+
+.cedge:hover .cedge-line,
+.cedge.selected .cedge-line {
+  opacity: 1;
+  stroke-width: 2.5;
+}
+
+.cedge-label {
+  font-family: inherit;
+  font-size: 10px;
+  fill: var(--text-muted);
+  paint-order: stroke;
+  stroke: var(--surface-dim);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.cedge.selected .cedge-label {
+  fill: var(--text);
+}
+
+/* ── Nodes ─────────────────────────────────────────────────── */
+
+.cnode {
+  position: absolute;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px;
+  background: linear-gradient(180deg, rgba(22, 31, 38, 0.97), rgba(14, 20, 24, 0.97));
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  overflow: hidden;
+  cursor: grab;
+  transition: border-color 0.12s;
+}
+
+.cnode:hover {
+  border-color: rgba(105, 240, 209, 0.45);
+}
+
+.cnode.linksrc {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.cnode.linktgt {
+  border-color: var(--tertiary);
+  box-shadow: 0 0 0 1px var(--tertiary);
+}
+
+.cnode-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.cnode-id {
+  color: var(--text-muted);
+}
+
+.cnode-acts {
+  display: flex;
+  gap: 2px;
+}
+
+.cnode-act {
+  padding: 0 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  line-height: 15px;
+}
+
+.cnode-act:hover {
+  border-color: var(--border);
+}
+
+.cnode-body {
+  flex: 1;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.cnode-edit textarea {
+  margin-bottom: 5px;
+}
+
+/* External (cross-bucket) stub */
+
+.cnode.external {
+  border: 1px dashed var(--secondary);
+  border-left: 3px solid var(--secondary);
+  background: rgba(255, 193, 122, 0.08);
+  cursor: pointer;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+.cnode.external:hover {
+  background: rgba(255, 193, 122, 0.16);
+}
+
+.cnode-ext-label {
+  color: var(--secondary);
+}
+
+.cnode-ext-hint {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+/* ── Coordinate rulers ─────────────────────────────────────── */
+
+.ruler {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+  color: var(--text-muted);
+  background: rgba(9, 13, 16, 0.66);
+}
+
+.ruler-x {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 16px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.ruler-y {
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 30px;
+  border-right: 1px solid var(--border-dim);
+}
+
+.ruler-corner {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  left: 0;
+  width: 30px;
+  height: 16px;
+  background: rgba(9, 13, 16, 0.85);
+  border-right: 1px solid var(--border-dim);
+  border-bottom: 1px solid var(--border-dim);
+  pointer-events: none;
+}
+
+.ruler-tick-x {
+  position: absolute;
+  top: 0;
+  font-size: 9px;
+  line-height: 16px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.ruler-tick-x::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -3px;
+  width: 1px;
+  height: 3px;
+  background: var(--border);
+}
+
+.ruler-tick-y {
+  position: absolute;
+  left: 0;
+  width: 30px;
+  padding-right: 6px;
+  text-align: right;
+  font-size: 9px;
+  line-height: 8px;
+  transform: translateY(-50%);
+}
+
+.ruler-tick-y::after {
+  content: "";
+  position: absolute;
+  right: -3px;
+  top: 50%;
+  width: 3px;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── Overlays ──────────────────────────────────────────────── */
+
+.canvas-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--text-muted);
+  padding: 11px 16px;
+  border: 1px dashed var(--border);
+  background: rgba(15, 22, 27, 0.7);
+  pointer-events: none;
+  text-align: center;
+}
+
+.canvas-bar {
+  position: absolute;
+  top: 11px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  background: rgba(11, 16, 20, 0.96);
+  backdrop-filter: blur(6px);
+}
+
+.canvas-bar input {
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 17px;
+  background: rgba(10, 15, 19, 0.84);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 5px 8px;
+  caret-color: var(--primary);
+}
+
+/* Maximize-width toggle (top-left, inside rulers) */
+.canvas-maxbtn {
+  position: absolute;
+  top: 22px;
+  left: 38px;
+  z-index: 5;
+  padding: 2px 6px;
+  letter-spacing: -1px;
+  background: rgba(11, 16, 20, 0.9);
+  border: 1px solid var(--border);
+}
+
+/* Bucket / stats HUD (top-right) */
+.canvas-stats {
+  position: absolute;
+  top: 22px;
+  right: 8px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 6px 11px;
+  border: 1px solid rgba(105, 240, 209, 0.28);
+  background: rgba(11, 16, 20, 0.9);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+
+.canvas-stats-bucket {
+  color: var(--primary);
+}
+
+/* Usage strip (bottom border) */
+.canvas-usage {
+  position: absolute;
+  bottom: 0;
+  left: 30px;
+  right: 0;
+  z-index: 4;
+  padding: 3px 11px;
+  color: var(--text-muted);
+  background: rgba(9, 13, 16, 0.66);
+  border-top: 1px solid var(--border-dim);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Editor modal ──────────────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+.modal-card {
+  width: min(640px, 100%);
+  max-height: 82vh;
+  padding: 22px;
+  border: 1px solid rgba(77, 100, 98, 0.42);
+  background: linear-gradient(180deg, rgba(20, 29, 35, 0.98), rgba(11, 16, 20, 0.98));
+}
+
+.modal-textarea {
+  flex: 1;
+  min-height: 320px;
+  resize: vertical;
+}

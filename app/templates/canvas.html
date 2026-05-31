@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+
+{% block head %}
+<link href="{{ url_for('static', path='/css/canvas.css') }}" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+{% raw %}
+<div id="canvas-app" v-cloak>
+  <!-- Auth banner -->
+  <div v-if="!authKey" class="notice" style="margin-bottom: 22px;">
+    <span>Enter your API key to connect.</span>
+    <div class="row" style="margin-left: auto;">
+      <div class="field" style="flex-direction: row; align-items: center; gap: 8px;">
+        <input type="password" v-model="authKeyInput" placeholder="Bearer token" @keydown.enter="saveAuth"
+          style="width: 260px;">
+        <button class="primary" @click="saveAuth">Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="authKey" class="stack gap-2" :class="{ 'canvas-max': maximized }">
+    <!-- Top bar -->
+    <div class="row spread">
+      <div class="row">
+        <div class="field" style="flex-direction: row; align-items: center; gap: 8px;">
+          <label>NS</label>
+          <select v-model="namespace" @change="reload" style="width: 150px;">
+            <option v-for="ns in namespaces" :key="ns" :value="ns">{{ ns }}</option>
+          </select>
+        </div>
+        <div class="field" style="flex-direction: row; align-items: center; gap: 8px;">
+          <label>Bucket</label>
+          <select v-model="activeBucket" @change="loadCanvas()" style="width: 170px;">
+            <option v-for="b in buckets" :key="b" :value="b">{{ b }}</option>
+          </select>
+        </div>
+      </div>
+      <div class="row gap-1">
+        <button @click="openAdd" class="primary" :disabled="!activeBucket">+ Add</button>
+        <button class="ghost" @click="relayout">Relayout</button>
+        <button class="ghost" @click="fitView">Fit</button>
+        <button class="ghost" @click="loadCanvas()" :disabled="loading">{{ loading ? '...' : 'Refresh' }}</button>
+        <button @click="disconnectAuth" class="ghost">Disconnect</button>
+      </div>
+    </div>
+
+    <!-- Canvas surface -->
+    <div class="canvas-wrap" ref="wrap" :class="{ grabbing: !!panning, linking: !!linkSource }"
+      @pointerdown="onBgPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp"
+      @pointerleave="onPointerUp" @wheel.prevent="onWheel">
+
+      <!-- Edge layer -->
+      <svg class="edge-layer">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+            orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" />
+          </marker>
+          <marker id="arrow-ext" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+            orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" />
+          </marker>
+        </defs>
+        <g :transform="gTransform">
+          <g v-for="e in edgeGeo" :key="e.id" class="cedge"
+            :class="{ external: e.external, selected: selectedEdge === e.id }"
+            @pointerdown.stop="selectEdge(e)">
+            <path class="cedge-hit" :d="e.d" />
+            <path class="cedge-line" :d="e.d" :marker-end="e.external ? 'url(#arrow-ext)' : 'url(#arrow)'" />
+            <text v-if="e.label" class="cedge-label" :x="e.mx" :y="e.my">{{ e.label }}</text>
+          </g>
+        </g>
+      </svg>
+
+      <!-- Node layer -->
+      <div class="node-layer" :style="layerStyle">
+        <div v-for="n in nodes" :key="n.id" class="cnode"
+          :class="{ external: n.kind === 'external', linksrc: linkSource === n.id, linktgt: linkTarget === n.id }"
+          :style="nodeStyle(n)"
+          @pointerdown.stop="onNodePointerDown($event, n)"
+          @click.stop="onNodeClick(n)"
+          @dblclick.stop="openEdit(n)">
+
+          <!-- External stub -->
+          <template v-if="n.kind === 'external'">
+            <div class="cnode-ext-label">{{ n.text }}</div>
+            <div class="cnode-ext-hint">{{ n.target_bucket ? 'click to open bucket' : 'target missing' }}</div>
+          </template>
+
+          <!-- Memory node -->
+          <template v-else>
+            <div class="cnode-head">
+              <span class="cnode-id codeish">{{ n.id.slice(0, 8) }}</span>
+              <span class="cnode-acts">
+                <button class="cnode-act" title="Connect from here" @pointerdown.stop @click.stop="startLink(n)">+</button>
+                <button class="cnode-act danger-text" title="Delete" @pointerdown.stop @click.stop="deleteNode(n)">x</button>
+              </span>
+            </div>
+            <div class="cnode-body">{{ n.text }}</div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Coordinate rulers -->
+      <div class="ruler ruler-x">
+        <div v-for="t in xTicks" :key="'x' + t.label" class="ruler-tick-x" :style="{ left: t.pos + 'px' }">
+          {{ t.label }}
+        </div>
+      </div>
+      <div class="ruler ruler-y">
+        <div v-for="t in yTicks" :key="'y' + t.label" class="ruler-tick-y" :style="{ top: t.pos + 'px' }">
+          {{ t.label }}
+        </div>
+      </div>
+      <div class="ruler-corner"></div>
+
+      <!-- Maximize-width toggle -->
+      <button class="canvas-maxbtn" @pointerdown.stop @click.stop="toggleMaximize"
+        :title="maximized ? 'Restore width' : 'Maximize width'">{{ maxLabel }}</button>
+
+      <!-- Bucket / stats overlay -->
+      <div v-if="activeBucket" class="canvas-stats">
+        <strong class="canvas-stats-bucket">{{ activeBucket }}</strong>
+        <span class="muted">{{ memoryCount }} nodes &middot; {{ edges.length }} edges &middot; {{ externalCount }}
+          cross-bucket</span>
+      </div>
+
+      <!-- Empty / hint overlays -->
+      <div v-if="!activeBucket" class="canvas-hint">No buckets yet. Add a memory from the Memory view first.</div>
+      <div v-else-if="!loading && !nodes.length" class="canvas-hint">
+        Bucket "{{ activeBucket }}" has no memories. Use "+ Add".
+      </div>
+      <div v-if="loading" class="canvas-hint">Loading canvas...</div>
+
+      <!-- Link mode banner -->
+      <div v-if="linkSource && !linkTarget" class="canvas-bar">
+        <span>Click a target node to connect from <b class="codeish">{{ linkSource.slice(0, 8) }}</b> &middot; Esc to
+          cancel</span>
+        <button class="ghost" @click="cancelLink">Cancel</button>
+      </div>
+
+      <!-- Relationship input -->
+      <div v-if="linkSource && linkTarget" class="canvas-bar">
+        <span class="codeish">{{ linkSource.slice(0, 8) }} &rarr; {{ linkTarget.slice(0, 8) }}</span>
+        <input type="text" v-model="relType" placeholder="relationship" @keydown.enter="confirmLink"
+          style="width: 160px;">
+        <button class="primary" @click="confirmLink" :disabled="!relType.trim()">Connect</button>
+        <button class="ghost" @click="cancelLink">Cancel</button>
+      </div>
+
+      <!-- Selected edge panel -->
+      <div v-if="selectedEdge && selectedEdgeInfo" class="canvas-bar">
+        <span class="codeish">{{ selectedEdgeInfo.from.slice(0, 8) }}</span>
+        <span class="tag secondary">{{ selectedEdgeInfo.label }}</span>
+        <span class="codeish">&rarr; {{ selectedEdgeInfo.toShort }}</span>
+        <button class="ghost danger-text" @click="disconnectSelected">Disconnect</button>
+        <button class="ghost" @click="selectedEdge = null">Close</button>
+      </div>
+
+      <!-- Usage hint (bottom border) -->
+      <div class="canvas-usage">
+        Drag nodes to rearrange &middot; scroll to zoom &middot; drag background to pan &middot;
+        double-click a node to edit &middot; orange nodes link to other buckets.
+      </div>
+    </div>
+  </div>
+
+  <!-- Memory editor modal -->
+  <div v-if="editor" class="modal-overlay" @pointerdown.self="closeEditor">
+    <div class="modal-card stack gap-2">
+      <p v-if="editor.mode === 'add'" class="eyebrow">NEW MEMORY IN "{{ activeBucket }}"</p>
+      <p v-else class="eyebrow">EDIT MEMORY</p>
+      <textarea v-model="editor.text" ref="editorField" class="modal-textarea" placeholder="Memory content..."
+        @keydown.ctrl.enter="saveEditor" @keydown.meta.enter="saveEditor"></textarea>
+      <div class="row spread">
+        <span class="muted codeish">{{ editor.mode === 'edit' ? editor.id.slice(0, 8) : 'Ctrl+Enter to save' }}</span>
+        <div class="row right gap-1">
+          <button class="ghost" @click="closeEditor">Cancel</button>
+          <button class="primary" @click="saveEditor" :disabled="!editor.text.trim() || editor.saving">
+            {{ editor.saving ? 'Saving...' : (editor.mode === 'add' ? 'Add to canvas' : 'Save') }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Error toast -->
+  <div v-if="error" class="notice error toast">
+    <span>{{ error }}</span>
+    <button class="ghost" @click="error = null" style="margin-left: auto;">Dismiss</button>
+  </div>
+
+  <!-- Success toast -->
+  <div v-if="success" class="notice success toast">
+    <span>{{ success }}</span>
+  </div>
+</div>
+{% endraw %}
+{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('static', path='/js/app/canvas.js') }}"></script>
+{% endblock %}

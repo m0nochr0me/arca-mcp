@@ -40,6 +40,7 @@ __all__ = (
     "delete_memory",
     "disconnect_memories",
     "get_connected",
+    "get_id_bucket_map",
     "get_last_memories",
     "get_memory",
     "list_namespaces",
@@ -129,15 +130,16 @@ async def get_memory(
 
 
 async def get_last_memories(
-    n: int = 5,
+    n: int | None = 5,
     bucket: str | None = None,
     namespace: str = "default",
     offset: int = 0,
 ) -> tuple[list[dict], int]:
     """Retrieve a page of memories ordered by creation time (most recent first).
 
-    Skips *offset* of the most recent memories, then returns the next *n*. Memories
-    without a ``created_at`` timestamp (pre-migration rows) are sorted last.
+    Skips *offset* of the most recent memories, then returns the next *n*. When *n* is
+    ``None`` every memory after *offset* is returned (no upper bound). Memories without a
+    ``created_at`` timestamp (pre-migration rows) are sorted last.
 
     Returns a ``(page, total)`` tuple where *total* is the number of memories matching
     the namespace/bucket filter, ignoring pagination.
@@ -159,7 +161,8 @@ async def get_last_memories(
     # Most recent first; pre-migration rows without created_at sort last
     results.sort(key=lambda r: r.get("created_at") or datetime.min.replace(tzinfo=UTC), reverse=True)
 
-    return results[offset : offset + n], len(results)
+    page = results[offset:] if n is None else results[offset : offset + n]
+    return page, len(results)
 
 
 async def add_memory(
@@ -468,6 +471,29 @@ async def buckets_list(
     )  # fmt: skip
 
     return {r["bucket"] for r in results}
+
+
+async def get_id_bucket_map(namespace: str = "default") -> dict[str, str]:
+    """Return a ``{memory_id: bucket}`` mapping for every memory in the namespace.
+
+    Used to resolve which bucket a connected node lives in when rendering a
+    per-bucket view, so edges crossing into other buckets can be labelled.
+    """
+
+    table = await _get_memory_table()
+
+    rows = (
+        await table.query()
+        .where(f"namespace='{_sanitize(namespace, 'namespace')}'")
+        .select(["memory_id", "bucket"])
+        .to_list()
+    )  # fmt: skip
+
+    out: dict[str, str] = {}
+    for r in rows:
+        mid = r["memory_id"]
+        out[str(mid if isinstance(mid, UUID) else UUID(bytes=mid))] = r["bucket"]
+    return out
 
 
 async def list_namespaces() -> set[str]:

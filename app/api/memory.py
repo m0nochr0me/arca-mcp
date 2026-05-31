@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import get_namespace, verify_token
+from app.schema.canvas import CanvasResponse
 from app.schema.memory import (
     BucketListResponse,
     BucketRenameRequest,
@@ -31,6 +32,7 @@ from app.schema.memory import (
     MemoryUpdateResponse,
     NamespaceListResponse,
 )
+from app.util.canvas import build_bucket_canvas
 from app.util.memory import (
     add_memories,
     add_memory,
@@ -40,6 +42,7 @@ from app.util.memory import (
     delete_memory,
     disconnect_memories,
     get_connected,
+    get_id_bucket_map,
     get_last_memories,
     get_memory,
     list_namespaces,
@@ -106,13 +109,14 @@ async def last_memories(
     namespace: str = Depends(get_namespace),
 ) -> MemoryListResponse:
     """Retrieve a page of the most recent memories ordered by creation time."""
-    results, total = await get_last_memories(body.n, body.bucket, namespace, body.offset)
+    n = None if body.all else body.n
+    results, total = await get_last_memories(n, body.bucket, namespace, body.offset)
     return MemoryListResponse(
         status="Memory retrieved" if results else "No memory found",
         results=[MemorySearchResult.model_validate(r) for r in results],
         total=total,
         offset=body.offset,
-        limit=body.n,
+        limit=len(results) if body.all else body.n,
     )
 
 
@@ -192,6 +196,25 @@ async def list_namespaces_endpoint() -> NamespaceListResponse:
     """List all namespaces that exist in the memory store."""
     namespaces = await list_namespaces()
     return NamespaceListResponse(namespaces=sorted(namespaces))
+
+
+@router.get(
+    "/canvas",
+    response_model=CanvasResponse,
+    response_model_exclude_none=True,
+)
+async def bucket_canvas(
+    bucket: str = Query(..., description="Bucket to render as a JSON Canvas"),
+    namespace: str = Depends(get_namespace),
+) -> CanvasResponse:
+    """Render a bucket's memories and connections as a JSON Canvas document.
+
+    Edges crossing into other buckets are attached to external stub nodes that carry
+    the target bucket, so clients can navigate there.
+    """
+    rows, _ = await get_last_memories(None, bucket, namespace)
+    id_bucket = await get_id_bucket_map(namespace)
+    return CanvasResponse.model_validate(build_bucket_canvas(rows, id_bucket, bucket))
 
 
 # ---- Knowledge-graph endpoints ----

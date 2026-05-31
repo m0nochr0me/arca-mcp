@@ -114,6 +114,15 @@ async def memory_dashboard(request: Request):
 
 
 @app.get(
+    "/canvas",
+    include_in_schema=False,
+)
+async def canvas_dashboard(request: Request):
+    """Interactive per-bucket knowledge-graph canvas."""
+    return templates.TemplateResponse(request, "canvas.html", {"page_title": "Canvas"})
+
+
+@app.get(
     "/favicon.ico",
     include_in_schema=False,
 )
