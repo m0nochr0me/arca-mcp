@@ -25,6 +25,9 @@ Interactive OpenAPI docs are available at `/docs` when the server is running.
 | `POST` | `/v1/memories/connect` | Create a directed edge between two nodes |
 | `POST` | `/v1/memories/disconnect` | Remove edges between two nodes |
 | `GET` | `/v1/memories/{memory_id}/connected` | Traverse the knowledge graph from a node |
+| `POST` | `/v1/ingest` | Chunk an uploaded document and store the chunks (optional `ingest` add-on) |
+| `POST` | `/v1/ingest/text` | Chunk raw text and store the chunks (optional `ingest` add-on) |
+| `GET` | `/v1/ingest/formats` | List installed loaders' file extensions (drives the web UI file picker) |
 
 Request and response models are defined in
 [`app/schema/memory.py`](../app/schema/memory.py) and
@@ -42,7 +45,15 @@ Search, pagination, and traversal results carry the following fields:
 | `connected_nodes` | `list[str]` | UUIDs this node links to |
 | `relationship_types` | `list[str]` | Parallel edge labels for `connected_nodes` |
 | `created_at` | `datetime \| null` | Creation timestamp |
+| `source` | `str \| null` | Originating document (ingested rows only) |
+| `chunk_index` | `int \| null` | Position of a chunk within its source document |
+| `kind` | `str \| null` | `"chunk"` / `"document"` for ingested rows; `null` for ordinary memories |
 | `_depth` | `int` | (`/connected` only) hop distance from the starting node |
+
+> **Search hygiene.** A search or `/memories/last` call **without** a `bucket` returns
+> curated facts only — ingested document rows (`kind` of `"chunk"`/`"document"`) are
+> excluded so they don't drown out hand-written memories. Scope the request to the
+> document's `bucket` to search its chunks.
 
 ## Examples
 
@@ -296,6 +307,83 @@ curl "http://localhost:4201/v1/memories/a1b2c3d4-e5f6-7890-abcd-ef1234567890/con
 }
 ```
 
+## Document ingestion
+
+Provided by the optional **`arca-ingest`** add-on (`uv sync --extra ingest`); defined in
+[`app/api/ingest.py`](../app/api/ingest.py). When the add-on is not installed, both routes
+return `501 Not Implemented`. A document is split into chunks; each chunk is embedded and
+stored as a memory in a per-document bucket (derived from the source name unless `bucket`
+is given).
+
+**Formats.** `.txt` / `.md` work out of the box. Richer formats each need an optional
+parser, installed into the server environment as an `arca-ingest` extra:
+
+| Extension | Extra | Parser |
+| - | - | - |
+| `.pdf` | `arca-ingest[pdf]` | `pypdf` |
+| `.docx` | `arca-ingest[docx]` | `python-docx` |
+| `.html`, `.htm` | `arca-ingest[html]` | `beautifulsoup4` |
+| `.epub` | `arca-ingest[epub]` | `ebooklib` + `beautifulsoup4` |
+| `.fb2` | `arca-ingest[fb2]` | `defusedxml` (stdlib XML, hardened) |
+
+A loader registers itself as soon as its parser is importable in the environment, so
+`uv pip install pypdf` (or `arca-ingest[all]` for every format) is enough to light up that
+extension — no server change or restart-time config. Posting a format whose parser isn't
+installed returns `415` with a message naming the extra to install.
+
+**Discovery.** `GET /v1/ingest/formats` returns `{ "available": bool, "extensions": [...] }`
+listing exactly the extensions the running server can parse. The web-UI ingest dropzone
+calls it to populate the file picker's `accept` filter and reject unsupported drops; when
+`available` is `false` (add-on absent) the UI hides the ingest affordance.
+
+**Provenance & graph.** Each bucket also gets one `kind="document"` anchor memory. Every
+chunk carries its `source` and `chunk_index`, and is linked with two edges: `part_of` →
+the anchor and `next` → the following chunk — so a document's structure is traversable via
+`/v1/memories/{id}/connected` and renders in `/v1/canvas`.
+
+**Idempotent re-ingestion.** Re-posting byte-identical content to the same bucket is a
+no-op: the response has `"skipped": true` and an empty `memory_ids`, and nothing is
+re-embedded. Set `replace=true` to clear the bucket and rebuild it (e.g. after the source
+document changed).
+
+### Ingest an uploaded file
+
+```bash
+curl -X POST http://localhost:4201/v1/ingest \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "X-Namespace: my_project" \
+  -F "file=@notes.md" \
+  -F "replace=true"
+```
+
+```json
+{
+  "status": "Document ingested",
+  "bucket": "notes",
+  "chunks": 12,
+  "memory_ids": ["a1b2c3d4-e5f6-7890-abcd-ef1234567890", "b2c3d4e5-f6a7-8901-bcde-f23456789012"],
+  "skipped": false
+}
+```
+
+A no-op re-ingest instead returns `"status": "Document unchanged"`, `"skipped": true`, and
+`"memory_ids": []`. Unsupported file types return `415`; documents exceeding
+`ARCA_INGEST_MAX_CHUNKS` return `422`.
+
+### Ingest raw text
+
+```bash
+curl -X POST http://localhost:4201/v1/ingest/text \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "X-Namespace: my_project" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "# Report\n\nLong document text...", "source": "report.md", "replace": true}'
+```
+
+The response shape is identical to the file upload. Stored chunks are ordinary memories,
+retrievable via `/v1/memories/search` **scoped to the document's `bucket`** (a global
+search omits them — see Search hygiene above).
+
 ## JSON Canvas
 
 `GET /v1/canvas?bucket=<name>` renders a bucket's memories and their connections as a
@@ -337,6 +425,6 @@ These are not part of the `/v1` API and are excluded from the OpenAPI schema unl
 | `GET` | `/` | Index — returns `{ "message": "OK" }` |
 | `GET` | `/health` | Health check — status, version, uptime, exec ID |
 | `GET` | `/docs` | Interactive OpenAPI documentation |
-| `GET` | `/memory` | Operator console (web UI) for browsing and editing memories |
+| `GET` | `/memory` | Operator console (web UI) for browsing, editing, and ingesting documents |
 | `GET` | `/canvas` | Interactive per-bucket knowledge-graph canvas (web UI) |
 | `*` | `/app/mcp` | MCP streamable-http endpoint (see [MCP Tools](mcp-tools.md)) |

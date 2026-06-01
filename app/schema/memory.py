@@ -80,6 +80,9 @@ class MemorySearchResult(BaseModel):
     connected_nodes: StrList = Field(default_factory=list)
     relationship_types: StrList = Field(default_factory=list)
     created_at: datetime | None = None
+    source: str | None = Field(default=None, description="Originating document (ingested chunks only)")
+    chunk_index: int | None = Field(default=None, description="Position within the source document")
+    kind: str | None = Field(default=None, description="'chunk' / 'document' for ingested rows; null otherwise")
 
     model_config = ConfigDict(extra="ignore")
 
@@ -157,6 +160,9 @@ class ConnectedResult(BaseModel):
     connected_nodes: StrList = Field(default_factory=list)
     relationship_types: StrList = Field(default_factory=list)
     created_at: datetime | None = None
+    source: str | None = None
+    chunk_index: int | None = None
+    kind: str | None = None
     depth: int = Field(alias="_depth")
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)

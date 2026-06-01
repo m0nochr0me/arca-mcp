@@ -39,6 +39,7 @@ __all__ = (
     "connect_memories",
     "delete_memory",
     "disconnect_memories",
+    "get_chunk_contents",
     "get_connected",
     "get_id_bucket_map",
     "get_last_memories",
@@ -58,8 +59,30 @@ _MEMORY_SCHEMA = pa.schema(
         ("relationship_types", pa.list_(pa.string())),
         ("vector", pa.list_(pa.float32(), list_size=settings.EMBEDDING_DIMENSION)),
         ("created_at", pa.timestamp("us", tz="UTC")),
+        # Document-ingestion provenance (NULL for ordinary memories):
+        ("source", pa.string()),  # originating document name
+        ("chunk_index", pa.int32()),  # 0-based position within the source
+        ("kind", pa.string()),  # "chunk" / "document" anchor; NULL = ordinary memory
     ]
 )
+
+# Predicate that drops ingested document rows (chunks + their anchor) from a result set,
+# keeping global recall to curated facts. NULL-safe: ordinary memories and pre-migration
+# rows have a NULL ``kind`` and must be kept.
+_EXCLUDE_INGESTED = "(kind IS NULL OR kind NOT IN ('chunk', 'document'))"
+
+# Columns returned to callers (everything bar the heavy vector).
+_RESULT_COLUMNS = [
+    "memory_id",
+    "content",
+    "bucket",
+    "connected_nodes",
+    "relationship_types",
+    "created_at",
+    "source",
+    "chunk_index",
+    "kind",
+]
 
 
 async def _get_memory_table() -> AsyncTable:
@@ -74,6 +97,16 @@ async def _get_memory_table() -> AsyncTable:
         schema = await memory_table.schema()
         if "created_at" not in schema.names:
             await memory_table.add_columns(pa.field("created_at", pa.timestamp("us", tz="UTC")))
+
+        # Migrate: add ingestion-provenance columns if missing (existing rows get NULL)
+        if "kind" not in schema.names:
+            await memory_table.add_columns(
+                [
+                    pa.field("source", pa.string()),
+                    pa.field("chunk_index", pa.int32()),
+                    pa.field("kind", pa.string()),
+                ]
+            )
     else:
         memory_table = await db.create_table(
             name="memory",
@@ -116,12 +149,16 @@ async def get_memory(
 
     where = f"namespace='{_sanitize(namespace, 'namespace')}'"
     if bucket is not None:
+        # Scoping to a bucket is an explicit request for that document's chunks.
         where += f" AND bucket='{_sanitize(bucket, 'bucket')}'"
+    else:
+        # Global search returns curated facts only; ingested document rows would drown them out.
+        where += f" AND {_EXCLUDE_INGESTED}"
 
     results = (
         await vector_query
         .where(where)
-        .select(["memory_id", "content", "bucket", "connected_nodes", "relationship_types", "created_at"])
+        .select(_RESULT_COLUMNS)
         .limit(top_k)
         .to_list()
     )  # fmt: skip
@@ -150,11 +187,14 @@ async def get_last_memories(
     where = f"namespace='{_sanitize(namespace, 'namespace')}'"
     if bucket is not None:
         where += f" AND bucket='{_sanitize(bucket, 'bucket')}'"
+    else:
+        # Keep the global recent-memories view free of ingested document rows.
+        where += f" AND {_EXCLUDE_INGESTED}"
 
     results = (
         await table.query()
         .where(where)
-        .select(["memory_id", "content", "bucket", "connected_nodes", "relationship_types", "created_at"])
+        .select(_RESULT_COLUMNS)
         .to_list()
     )  # fmt: skip
 
@@ -171,8 +211,15 @@ async def add_memory(
     namespace: str = "default",
     connected_nodes: list[str] | None = None,
     relationship_types: list[str] | None = None,
+    source: str | None = None,
+    chunk_index: int | None = None,
+    kind: str | None = None,
 ) -> UUID:
-    """Add new documents to the vector store with their embeddings."""
+    """Add new documents to the vector store with their embeddings.
+
+    *source*, *chunk_index*, and *kind* carry document-ingestion provenance and are NULL
+    for ordinary memories.
+    """
 
     nodes = connected_nodes or []
     rels = relationship_types or []
@@ -194,6 +241,9 @@ async def add_memory(
         "relationship_types": rels,
         "vector": embedding,
         "created_at": datetime.now(UTC),
+        "source": source,
+        "chunk_index": chunk_index,
+        "kind": kind,
     }
 
     await table.add([data], mode="append")
@@ -208,7 +258,9 @@ async def add_memories(
     """Add multiple memories in a single batch.
 
     Each item in *items* must have a ``content`` key and optionally ``bucket``,
-    ``connected_nodes``, and ``relationship_types``.
+    ``connected_nodes``, ``relationship_types``, the ingestion-provenance fields
+    ``source`` / ``chunk_index`` / ``kind``, and a pre-generated ``memory_id`` (a
+    :class:`~uuid.UUID`; lets callers wire edges between items before they are stored).
 
     Embeddings are generated in a single batched API call for efficiency.
     """
@@ -232,7 +284,7 @@ async def add_memories(
     rows: list[dict] = []
 
     for item, embedding in zip(items, embeddings, strict=True):
-        memory_id = uuid4()
+        memory_id = item.get("memory_id") or uuid4()
         ids.append(memory_id)
         rows.append(
             {
@@ -244,6 +296,9 @@ async def add_memories(
                 "relationship_types": item.get("relationship_types") or [],
                 "vector": embedding,
                 "created_at": now,
+                "source": item.get("source"),
+                "chunk_index": item.get("chunk_index"),
+                "kind": item.get("kind"),
             }
         )
 
@@ -442,7 +497,7 @@ async def get_connected(
             detail_rows = (
                 await table.query()
                 .where(f"memory_id=X'{target_uuid.hex}' AND namespace='{_sanitize(namespace, 'namespace')}'")
-                .select(["memory_id", "content", "bucket", "connected_nodes", "relationship_types", "created_at"])
+                .select(_RESULT_COLUMNS)
                 .to_list()
             )  # fmt: skip
             for row in detail_rows:
@@ -471,6 +526,28 @@ async def buckets_list(
     )  # fmt: skip
 
     return {r["bucket"] for r in results}
+
+
+async def get_chunk_contents(bucket: str, namespace: str = "default") -> list[str]:
+    """Return the contents of a bucket's ingested chunk memories, ordered by ``chunk_index``.
+
+    Used by the ingestion add-on to detect an unchanged re-ingest (content dedup). Returns
+    an empty list when the bucket holds no chunks.
+    """
+
+    table = await _get_memory_table()
+
+    rows = (
+        await table.query()
+        .where(
+            f"bucket='{_sanitize(bucket, 'bucket')}' AND namespace='{_sanitize(namespace, 'namespace')}' AND kind='chunk'"
+        )
+        .select(["content", "chunk_index"])
+        .to_list()
+    )  # fmt: skip
+
+    rows.sort(key=lambda r: r["chunk_index"] if r.get("chunk_index") is not None else 0)
+    return [r["content"] for r in rows]
 
 
 async def get_id_bucket_map(namespace: str = "default") -> dict[str, str]:

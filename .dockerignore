@@ -10,7 +10,8 @@
 *mcp.
 
 .venv/
-.lancedb/
+lancedb/
 __pycache__/
 scratch/
 .ruff_cache/
+.git/

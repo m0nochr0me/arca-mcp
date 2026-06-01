@@ -1,6 +1,6 @@
 [project]
 name = "arca-mcp"
-version = "0.7.0"
+version = "0.8.1"
 description = "Arca Memory Core - MCP Server for compact memories."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -20,8 +20,29 @@ dependencies = [
     "jinja2>=3.1.6",
 ]
 
+[project.optional-dependencies]
+ingest = ["arca-ingest", "protobuf>=4.25", "python-multipart>=0.0.9", "sentencepiece>=0.2.0"]
+# Same as `ingest`, but pulls every optional format loader (PDF/DOCX/HTML/EPUB/FB2).
+# Use this to enable all ingestion formats in one shot, e.g. in Docker:
+#   docker build --build-arg ARCA_INSTALL_EXTRAS=ingest-all ...
+ingest-all = ["arca-mcp[ingest]", "arca-ingest[all]"]
+
+[build-system]
+requires = ["uv_build>=0.10.9,<0.11.0"]
+build-backend = "uv_build"
+
 [tool.uv]
 exclude-newer = "7 days"
+
+[tool.uv.build-backend]
+module-name = "app"
+module-root = ""
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+arca-ingest = { workspace = true }
 
 [tool.ruff]
 line-length = 120
@@ -34,4 +55,4 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [dependency-groups]
-dev = ["pre-commit>=4.5.1", "ruff>=0.15.8"]
+dev = ["pre-commit>=4.5.1", "pytest>=8.3", "ruff>=0.15.8"]

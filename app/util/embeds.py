@@ -1,12 +1,48 @@
+import asyncio
+import random
 from typing import Literal, overload
 
-from google.genai import types
+from google.genai import errors, types
 
 from app.core.ai import ai_client
 from app.core.cache import cache, make_cache_key
 from app.core.config import settings
+from app.core.log import logger
 
 _MAX_BATCH_SIZE = 100
+
+# HTTP status codes worth retrying: rate limiting and transient server errors.
+_RETRYABLE_CODES = {429, 500, 502, 503, 504}
+
+
+async def _embed_content(contents: list[str], mode: Literal["retrieval", "storage"]):
+    """Call the Gemini embedding API with exponential backoff on transient failures.
+
+    ``embeds`` has no native rate-limit handling, so a large ingestion (many embed calls)
+    could fail on a transient 429. Retries 429/5xx with exponential backoff plus jitter,
+    up to ``EMBED_MAX_RETRIES`` times; other errors propagate immediately.
+    """
+    config = types.EmbedContentConfig(
+        task_type="RETRIEVAL_QUERY" if mode == "retrieval" else "RETRIEVAL_DOCUMENT",
+        output_dimensionality=settings.EMBEDDING_DIMENSION,
+    )
+
+    for attempt in range(settings.EMBED_MAX_RETRIES + 1):
+        try:
+            return await ai_client.aio.models.embed_content(
+                model=settings.EMBEDDING_MODEL,
+                contents=contents,
+                config=config,
+            )
+        except errors.APIError as exc:
+            if attempt >= settings.EMBED_MAX_RETRIES or getattr(exc, "code", None) not in _RETRYABLE_CODES:
+                raise
+            delay = settings.EMBED_RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, settings.EMBED_RETRY_BASE_DELAY)
+            logger.warning(
+                f"Embedding call failed ({getattr(exc, 'code', '?')}); retry {attempt + 1}/"
+                f"{settings.EMBED_MAX_RETRIES} in {delay:.2f}s"
+            )
+            await asyncio.sleep(delay)
 
 
 @overload
@@ -55,14 +91,7 @@ async def get_embedding(
             uncached_texts.append(t)
 
     if uncached_texts:
-        response = await ai_client.aio.models.embed_content(
-            model=settings.EMBEDDING_MODEL,
-            contents=uncached_texts,
-            config=types.EmbedContentConfig(
-                task_type="RETRIEVAL_QUERY" if mode == "retrieval" else "RETRIEVAL_DOCUMENT",
-                output_dimensionality=settings.EMBEDDING_DIMENSION,
-            ),
-        )
+        response = await _embed_content(uncached_texts, mode)
 
         if not response.embeddings or len(response.embeddings) != len(uncached_texts):
             raise ValueError("Unexpected number of embeddings returned from the AI client.")
@@ -87,14 +116,7 @@ async def _get_single_embedding(
     if cached_embedding := await cache.get(cache_key):
         return cached_embedding
 
-    response = await ai_client.aio.models.embed_content(
-        model=settings.EMBEDDING_MODEL,
-        contents=[text],
-        config=types.EmbedContentConfig(
-            task_type="RETRIEVAL_QUERY" if mode == "retrieval" else "RETRIEVAL_DOCUMENT",
-            output_dimensionality=settings.EMBEDDING_DIMENSION,
-        ),
-    )
+    response = await _embed_content([text], mode)
 
     if not response.embeddings or len(response.embeddings) == 0:
         raise ValueError("No embeddings returned from the AI client.")

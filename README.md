@@ -10,6 +10,7 @@ A Model Context Protocol (MCP) server providing semantic memory storage and retr
 - **Multi-Tenant Isolation** — Namespace-scoped operations via `X-Namespace` HTTP header
 - **Bucket Organization** — Group memories into logical buckets for structured storage
 - **JSON Canvas Export** — Render a bucket's memories and connections as a [JSON Canvas](https://jsoncanvas.org/) document
+- **Document Ingestion** *(optional add-on)* — Chunk and store whole documents (txt/md, plus PDF/DOCX/HTML/EPUB/FB2 via per-format extras) through the `arca-ingest` package (`uv sync --extra ingest`), exposed as `POST /v1/ingest` and the `memory/ingest` tool
 - **Embedding Caching** — Redis-backed cache for generated embeddings to minimize API calls
 - **Bearer Token Auth** — Constant-time token verification for secure access
 
@@ -45,8 +46,14 @@ The server starts on `http://0.0.0.0:4201` by default, with the MCP interface at
 ## Docker
 
 ```bash
-# Build
+# Build (core, no add-ons)
 docker build -t arca-mcp .
+
+# Build with the document-ingestion add-on (txt/md only)
+docker build --build-arg ARCA_INSTALL_EXTRAS=ingest -t arca-mcp .
+
+# Build with ingestion + every format loader (PDF/DOCX/HTML/EPUB/FB2)
+docker build --build-arg ARCA_INSTALL_EXTRAS=ingest-all -t arca-mcp .
 
 # Run
 docker run -p 4201:4201 \
@@ -57,6 +64,8 @@ docker run -p 4201:4201 \
 ```
 
 The Docker image uses Python 3.14 slim with UV for dependency management. Mount a volume at `ARCA_VECTOR_STORE_PATH` (default `./lancedb`) to persist data across container restarts.
+
+`ARCA_INSTALL_EXTRAS` selects an optional [extra](pyproject.toml) to install at build time: `ingest` for the base add-on (txt/md), or `ingest-all` for the add-on plus all format parsers. The build arg takes a single extra **name** — not a `pkg[extra]` specifier like `ingest[all]`.
 
 ## MCP Client Configuration
 

@@ -32,6 +32,7 @@
       </div>
       <div class="row">
         <button @click="showAddForm = !showAddForm" class="primary">+ Add Memory</button>
+        <button v-if="ingestAvailable" @click="showIngestForm = !showIngestForm" class="ghost">+ Ingest Document</button>
         <button @click="disconnectAuth" class="ghost">Disconnect</button>
       </div>
     </div>
@@ -73,6 +74,41 @@
         <button class="ghost" @click="showAddForm = false">Cancel</button>
         <button class="primary" @click="addMemory" :disabled="!newMemory.content.trim() || saving">
           {{ saving ? 'Saving...' : 'Save' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Ingest document form -->
+    <div v-if="showIngestForm" class="panel stack gap-3">
+      <p class="eyebrow">INGEST DOCUMENT</p>
+      <input type="file" ref="ingestInput" :accept="acceptAttr"
+        @change="onIngestPick" style="display: none;">
+      <div class="dropzone" :class="{ dragging: ingestDragging }" @click="$refs.ingestInput.click()"
+        @dragover.prevent="ingestDragging = true" @dragleave.prevent="ingestDragging = false"
+        @drop.prevent="onIngestDrop">
+        <template v-if="ingestFile">
+          <strong class="codeish">{{ ingestFile.name }}</strong>
+          <span class="muted">{{ (ingestFile.size / 1024).toFixed(1) }} KB &middot; click to choose another</span>
+        </template>
+        <template v-else>
+          <strong>Drop a file here, or click to choose</strong>
+          <span class="muted">Supported: {{ formatsLabel }} &middot; split into chunks and stored in a per-document bucket.</span>
+        </template>
+      </div>
+      <div class="row">
+        <div class="field" style="flex: 1;">
+          <label>Bucket (optional)</label>
+          <input type="text" v-model="ingestBucket" placeholder="defaults to the file name">
+        </div>
+        <label class="checkbox" style="margin-top: 16px;" title="Clear the bucket before ingesting">
+          <input type="checkbox" v-model="ingestReplace">
+          <span>Replace existing</span>
+        </label>
+      </div>
+      <div class="row right gap-2">
+        <button class="ghost" @click="showIngestForm = false">Cancel</button>
+        <button class="primary" @click="ingestDocument" :disabled="!ingestFile || ingesting">
+          {{ ingesting ? 'Ingesting...' : 'Ingest' }}
         </button>
       </div>
     </div>

@@ -31,6 +31,20 @@ document.addEventListener("DOMContentLoaded", () => {
       const newMemory = ref({ content: "", bucket: "" });
       const saving = ref(false);
 
+      // ── Ingest document ────────────────────────────────────
+      const showIngestForm = ref(false);
+      const ingestFile = ref(null);
+      const ingestBucket = ref("");
+      const ingestReplace = ref(false);
+      const ingesting = ref(false);
+      const ingestDragging = ref(false);
+      const ingestAvailable = ref(true);   // optimistic until /ingest/formats answers
+      const supportedFormats = ref([]);    // file extensions the server can actually parse
+      const acceptAttr = computed(() => supportedFormats.value.join(","));
+      const formatsLabel = computed(() =>
+        supportedFormats.value.length ? supportedFormats.value.join(", ") : ".txt, .md"
+      );
+
       // ── Inline edit ────────────────────────────────────────
       const editingId = ref(null);
       const editContent = ref("");
@@ -256,6 +270,86 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
 
+      // ── Ingest document ────────────────────────────────────
+
+      async function loadIngestFormats() {
+        try {
+          const data = await api("GET", "/ingest/formats");
+          ingestAvailable.value = data.available;
+          supportedFormats.value = data.extensions || [];
+        } catch {
+          // Non-fatal: keep optimistic defaults so ingestion still works if the probe fails.
+        }
+      }
+
+      function extOf(name) {
+        const i = name.lastIndexOf(".");
+        return i === -1 ? "" : name.slice(i).toLowerCase();
+      }
+
+      function setIngestFile(f) {
+        if (!f) return;
+        const exts = supportedFormats.value;
+        // Drag-and-drop bypasses the file picker's `accept`, so validate here too.
+        if (exts.length && !exts.includes(extOf(f.name))) {
+          showError(`Unsupported file type "${extOf(f.name) || f.name}". Supported: ${exts.join(", ")}`);
+          return;
+        }
+        ingestFile.value = f;
+      }
+
+      function onIngestPick(e) {
+        setIngestFile(e.target.files && e.target.files[0]);
+        e.target.value = "";  // allow re-picking the same file later
+      }
+
+      function onIngestDrop(e) {
+        ingestDragging.value = false;
+        setIngestFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+      }
+
+      async function ingestDocument() {
+        if (!ingestFile.value) return;
+        ingesting.value = true;
+        try {
+          const form = new FormData();
+          form.append("file", ingestFile.value);
+          if (ingestBucket.value.trim()) form.append("bucket", ingestBucket.value.trim());
+          form.append("replace", String(ingestReplace.value));
+          // Multipart upload: let the browser set Content-Type (with boundary), so we
+          // can't reuse the JSON `api()` helper.
+          const res = await fetch("/v1/ingest", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${authKey.value}`,
+              "X-Namespace": namespace.value || "default",
+            },
+            body: form,
+          });
+          if (!res.ok) {
+            const detail = await res.text();
+            throw new Error(`${res.status}: ${detail}`);
+          }
+          const data = await res.json();
+          showIngestForm.value = false;
+          ingestFile.value = null;
+          ingestBucket.value = "";
+          ingestReplace.value = false;
+          if (data.skipped) {
+            flash(`Unchanged — "${data.bucket}" already ingested`);
+          } else {
+            flash(`Ingested -> "${data.bucket}" (${data.chunks} chunk${data.chunks === 1 ? "" : "s"})`);
+          }
+          await loadBuckets();
+          isSearchResult.value = false;
+          selectBucket(data.bucket);  // jump straight to the per-document bucket
+        } catch (e) {
+          showError("Ingest failed: " + e.message);
+        } finally {
+          ingesting.value = false;
+        }
+      }
+
       async function deleteMemory(m) {
         const ok = await window.PillbugDashboardConfirm.open({
           title: "Delete memory",
@@ -389,6 +483,7 @@ document.addEventListener("DOMContentLoaded", () => {
         localStorage.setItem("arca_namespace", namespace.value || "default");
         page.value = 0;
         await loadNamespaces();
+        await loadIngestFormats();
         await loadBuckets();
         await loadMemories();
       }
@@ -403,6 +498,8 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       onMounted(() => {
+        // Hook from the canvas page: /memory#ingest opens the ingest panel.
+        if (location.hash === "#ingest") showIngestForm.value = true;
         if (authKey.value) {
           nextTick(() => reload());
         }
@@ -421,6 +518,10 @@ document.addEventListener("DOMContentLoaded", () => {
         // Add memory
         showAddForm, newMemory, saving,
         addMemory,
+        // Ingest document
+        showIngestForm, ingestFile, ingestBucket, ingestReplace, ingesting, ingestDragging,
+        ingestAvailable, supportedFormats, acceptAttr, formatsLabel,
+        onIngestPick, onIngestDrop, ingestDocument,
         // Inline edit
         editingId, editContent, editBucket, updatingId,
         startEdit, cancelEdit, saveEdit,
