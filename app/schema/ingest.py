@@ -18,3 +18,10 @@ class IngestResponse(BaseModel):
     chunks: int
     memory_ids: list[UUID]
     skipped: bool = Field(default=False, description="True when an identical document was already ingested (no-op)")
+
+
+class IngestFormatsResponse(BaseModel):
+    available: bool = Field(..., description="Whether the ingestion add-on is installed")
+    extensions: list[str] = Field(
+        default_factory=list, description="File extensions the installed loaders accept (e.g. '.txt', '.pdf')"
+    )

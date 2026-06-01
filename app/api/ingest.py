@@ -7,8 +7,8 @@ not installed they return ``501 Not Implemented``.
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.api.deps import get_namespace, verify_token
-from app.schema.ingest import IngestResponse, IngestTextRequest
-from app.util.ingest import INGEST_AVAILABLE, UnsupportedFormat, ingest_document
+from app.schema.ingest import IngestFormatsResponse, IngestResponse, IngestTextRequest
+from app.util.ingest import INGEST_AVAILABLE, UnsupportedFormat, ingest_document, supported_extensions
 
 router = APIRouter(prefix="/v1", tags=["ingest"], dependencies=[Depends(verify_token)])
 
@@ -17,6 +17,12 @@ _UNAVAILABLE = "Document ingestion add-on is not installed. Install the 'ingest'
 
 def _status_for(result: dict) -> str:
     return "Document unchanged" if result["skipped"] else "Document ingested"
+
+
+@router.get("/ingest/formats", response_model=IngestFormatsResponse)
+async def ingest_formats() -> IngestFormatsResponse:
+    """List the file extensions the installed loaders accept (empty when the add-on is absent)."""
+    return IngestFormatsResponse(available=INGEST_AVAILABLE, extensions=supported_extensions())
 
 
 if INGEST_AVAILABLE:

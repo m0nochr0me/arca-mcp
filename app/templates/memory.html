@@ -32,7 +32,7 @@
       </div>
       <div class="row">
         <button @click="showAddForm = !showAddForm" class="primary">+ Add Memory</button>
-        <button @click="showIngestForm = !showIngestForm" class="ghost">+ Ingest Document</button>
+        <button v-if="ingestAvailable" @click="showIngestForm = !showIngestForm" class="ghost">+ Ingest Document</button>
         <button @click="disconnectAuth" class="ghost">Disconnect</button>
       </div>
     </div>
@@ -81,7 +81,7 @@
     <!-- Ingest document form -->
     <div v-if="showIngestForm" class="panel stack gap-3">
       <p class="eyebrow">INGEST DOCUMENT</p>
-      <input type="file" ref="ingestInput" accept=".txt,.md,.markdown,text/plain,text/markdown"
+      <input type="file" ref="ingestInput" :accept="acceptAttr"
         @change="onIngestPick" style="display: none;">
       <div class="dropzone" :class="{ dragging: ingestDragging }" @click="$refs.ingestInput.click()"
         @dragover.prevent="ingestDragging = true" @dragleave.prevent="ingestDragging = false"
@@ -91,8 +91,8 @@
           <span class="muted">{{ (ingestFile.size / 1024).toFixed(1) }} KB &middot; click to choose another</span>
         </template>
         <template v-else>
-          <strong>Drop a .txt / .md file here, or click to choose</strong>
-          <span class="muted">The document is split into chunks and stored in a per-document bucket.</span>
+          <strong>Drop a file here, or click to choose</strong>
+          <span class="muted">Supported: {{ formatsLabel }} &middot; split into chunks and stored in a per-document bucket.</span>
         </template>
       </div>
       <div class="row">

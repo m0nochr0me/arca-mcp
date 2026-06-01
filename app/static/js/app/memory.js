@@ -38,6 +38,12 @@ document.addEventListener("DOMContentLoaded", () => {
       const ingestReplace = ref(false);
       const ingesting = ref(false);
       const ingestDragging = ref(false);
+      const ingestAvailable = ref(true);   // optimistic until /ingest/formats answers
+      const supportedFormats = ref([]);    // file extensions the server can actually parse
+      const acceptAttr = computed(() => supportedFormats.value.join(","));
+      const formatsLabel = computed(() =>
+        supportedFormats.value.length ? supportedFormats.value.join(", ") : ".txt, .md"
+      );
 
       // ── Inline edit ────────────────────────────────────────
       const editingId = ref(null);
@@ -266,16 +272,40 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // ── Ingest document ────────────────────────────────────
 
+      async function loadIngestFormats() {
+        try {
+          const data = await api("GET", "/ingest/formats");
+          ingestAvailable.value = data.available;
+          supportedFormats.value = data.extensions || [];
+        } catch {
+          // Non-fatal: keep optimistic defaults so ingestion still works if the probe fails.
+        }
+      }
+
+      function extOf(name) {
+        const i = name.lastIndexOf(".");
+        return i === -1 ? "" : name.slice(i).toLowerCase();
+      }
+
+      function setIngestFile(f) {
+        if (!f) return;
+        const exts = supportedFormats.value;
+        // Drag-and-drop bypasses the file picker's `accept`, so validate here too.
+        if (exts.length && !exts.includes(extOf(f.name))) {
+          showError(`Unsupported file type "${extOf(f.name) || f.name}". Supported: ${exts.join(", ")}`);
+          return;
+        }
+        ingestFile.value = f;
+      }
+
       function onIngestPick(e) {
-        const f = e.target.files && e.target.files[0];
-        if (f) ingestFile.value = f;
+        setIngestFile(e.target.files && e.target.files[0]);
         e.target.value = "";  // allow re-picking the same file later
       }
 
       function onIngestDrop(e) {
         ingestDragging.value = false;
-        const f = e.dataTransfer.files && e.dataTransfer.files[0];
-        if (f) ingestFile.value = f;
+        setIngestFile(e.dataTransfer.files && e.dataTransfer.files[0]);
       }
 
       async function ingestDocument() {
@@ -453,6 +483,7 @@ document.addEventListener("DOMContentLoaded", () => {
         localStorage.setItem("arca_namespace", namespace.value || "default");
         page.value = 0;
         await loadNamespaces();
+        await loadIngestFormats();
         await loadBuckets();
         await loadMemories();
       }
@@ -489,6 +520,7 @@ document.addEventListener("DOMContentLoaded", () => {
         addMemory,
         // Ingest document
         showIngestForm, ingestFile, ingestBucket, ingestReplace, ingesting, ingestDragging,
+        ingestAvailable, supportedFormats, acceptAttr, formatsLabel,
         onIngestPick, onIngestDrop, ingestDocument,
         // Inline edit
         editingId, editContent, editBucket, updatingId,

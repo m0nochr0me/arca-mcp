@@ -32,6 +32,17 @@ except ImportError:
 _EMBED_BATCH = 100  # matches the add_memories / Gemini embed-call cap
 
 
+def supported_extensions() -> list[str]:
+    """Sorted file extensions the installed loaders accept (empty when the add-on is absent).
+
+    Reflects which optional format parsers are importable in this environment, so callers
+    (e.g. the web UI) can offer exactly the formats that will actually ingest.
+    """
+    if not INGEST_AVAILABLE:
+        return []
+    return sorted(arca_ingest.supported_extensions())
+
+
 @lru_cache(maxsize=1)
 def _token_counter() -> Callable[[str], int] | None:
     """Return an accurate local Gemini token counter, or ``None`` for the word counter.

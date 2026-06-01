@@ -27,6 +27,7 @@ Interactive OpenAPI docs are available at `/docs` when the server is running.
 | `GET` | `/v1/memories/{memory_id}/connected` | Traverse the knowledge graph from a node |
 | `POST` | `/v1/ingest` | Chunk an uploaded document and store the chunks (optional `ingest` add-on) |
 | `POST` | `/v1/ingest/text` | Chunk raw text and store the chunks (optional `ingest` add-on) |
+| `GET` | `/v1/ingest/formats` | List installed loaders' file extensions (drives the web UI file picker) |
 
 Request and response models are defined in
 [`app/schema/memory.py`](../app/schema/memory.py) and
@@ -329,6 +330,11 @@ A loader registers itself as soon as its parser is importable in the environment
 `uv pip install pypdf` (or `arca-ingest[all]` for every format) is enough to light up that
 extension — no server change or restart-time config. Posting a format whose parser isn't
 installed returns `415` with a message naming the extra to install.
+
+**Discovery.** `GET /v1/ingest/formats` returns `{ "available": bool, "extensions": [...] }`
+listing exactly the extensions the running server can parse. The web-UI ingest dropzone
+calls it to populate the file picker's `accept` filter and reject unsupported drops; when
+`available` is `false` (add-on absent) the UI hides the ingest affordance.
 
 **Provenance & graph.** Each bucket also gets one `kind="document"` anchor memory. Every
 chunk carries its `source` and `chunk_index`, and is linked with two edges: `part_of` →
