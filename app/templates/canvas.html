@@ -38,6 +38,7 @@
       </div>
       <div class="row gap-1">
         <button @click="openAdd" class="primary" :disabled="!activeBucket">+ Add</button>
+        <a href="/memory#ingest" class="btn ghost" title="Ingest a document on the Memory view">Ingest</a>
         <button class="ghost" @click="relayout">Relayout</button>
         <button class="ghost" @click="fitView">Fit</button>
         <button class="ghost" @click="loadCanvas()" :disabled="loading">{{ loading ? '...' : 'Refresh' }}</button>

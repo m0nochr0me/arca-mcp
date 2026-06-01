@@ -1,10 +1,11 @@
 # Document Ingestion Add-on — Implementation Plan
 
-> **Status:** Phases 0–2 implemented (2026-06-01). The `arca-ingest` package, the
-> `POST /v1/ingest` + `/v1/ingest/text` endpoints, and the `memory/ingest` MCP tool are
-> live; reference docs are in `configuration.md`, `rest-api.md`, and `mcp-tools.md`.
-> Phases 3–4 (a web UI ingestion affordance; then additional format loaders) remain the
-> design reference below. Deviations from the original plan:
+> **Status:** Phases 0–3 implemented (2026-06-01). The `arca-ingest` package, the
+> `POST /v1/ingest` + `/v1/ingest/text` endpoints, the `memory/ingest` MCP tool, and the
+> operator-console ingest affordance (`/memory`, with an `Ingest` link from `/canvas`)
+> are live; reference docs are in `configuration.md`, `rest-api.md`, and `mcp-tools.md`.
+> Phase 4 (additional format loaders) remains the design reference below. Deviations from
+> the original plan:
 > - `ARCA_INGEST_ENABLED` was dropped — install-gating via the `ingest` extra already
 >   provides the on/off switch.
 > - **Phase 2 dedup** uses no `content_hash` column: the `source`/`chunk_index` columns
@@ -294,13 +295,17 @@ and `next` chunk; a byte-identical re-ingest is a `skipped` no-op; `replace=true
 11. Content-comparison dedup (no new column; see deviations above); embed retry/backoff
     in `embeds.py` (exponential backoff + jitter on 429/5xx).
 
-**Phase 3 — Web UI ingestion support**
+**Phase 3 — Web UI ingestion support** ✅ DONE → verified with a headless-browser flow
+(Playwright + chromium): clicking **+ Ingest Document**, picking a `.md` file, and
+ingesting yields the success toast, auto-selects the per-document bucket, and lists the
+chunks — no console errors.
 
-12. Add an upload/ingest affordance to the operator console (`/memory`, with a hook from
-    `/canvas`): a file picker / drag-and-drop that POSTs to `/v1/ingest`, reports the
-    resulting bucket and chunk count, surfaces `415`/`422` errors, and links straight to
-    the per-document bucket. Vue templates in `app/templates/` + assets in `app/static/`;
-    no engine changes.
+12. Added an upload/ingest affordance to the operator console (`/memory`, with an
+    `Ingest` link from `/canvas` → `/memory#ingest`): a file picker / drag-and-drop
+    dropzone that POSTs multipart to `/v1/ingest`, reports the resulting bucket + chunk
+    count (and the `skipped` no-op), surfaces `415`/`422` as an error toast, and jumps
+    straight to the per-document bucket. Vue template + dropzone CSS only; no engine
+    changes.
 
 **Phase 4 — Formats support (separate later phase)**
 

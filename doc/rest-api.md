@@ -403,6 +403,6 @@ These are not part of the `/v1` API and are excluded from the OpenAPI schema unl
 | `GET` | `/` | Index — returns `{ "message": "OK" }` |
 | `GET` | `/health` | Health check — status, version, uptime, exec ID |
 | `GET` | `/docs` | Interactive OpenAPI documentation |
-| `GET` | `/memory` | Operator console (web UI) for browsing and editing memories |
+| `GET` | `/memory` | Operator console (web UI) for browsing, editing, and ingesting documents |
 | `GET` | `/canvas` | Interactive per-bucket knowledge-graph canvas (web UI) |
 | `*` | `/app/mcp` | MCP streamable-http endpoint (see [MCP Tools](mcp-tools.md)) |
