@@ -8,10 +8,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Future format loaders are kept optional even within the add-on:
-# pdf = ["pypdf>=6.0.0"]
-# docx = ["python-docx>=1.1.2"]
-# html = ["beautifulsoup4>=4.13.0"]
+# Format loaders are kept optional even within the add-on; each registers itself in
+# arca_ingest.loaders only when its parser is importable.
+pdf = ["pypdf>=5.0.0"]
+docx = ["python-docx>=1.1.2"]
+html = ["beautifulsoup4>=4.12.0"]
+epub = ["ebooklib>=0.18", "beautifulsoup4>=4.12.0"]
+fb2 = ["defusedxml>=0.7.1"]
+all = ["arca-ingest[pdf,docx,html,epub,fb2]"]
 
 [build-system]
 requires = ["hatchling"]

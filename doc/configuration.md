@@ -53,3 +53,10 @@ through a `.env` file in the project root. Settings are loaded by Pydantic
   with google-genai's local Gemini tokenizer when `sentencepiece` + `protobuf` are
   available, falling back to a word count otherwise. See
   [`doc/ingestion-plan.md`](ingestion-plan.md).
+- **Ingestion formats** — `.txt` / `.md` work with the base add-on. PDF, DOCX, HTML,
+  EPUB, and FB2 each need an optional parser. For the whole server in one shot, use the
+  root `ingest-all` extra (`uv sync --extra ingest-all`, or the Docker
+  `--build-arg ARCA_INSTALL_EXTRAS=ingest-all`); to add just one format, install its
+  `arca-ingest` extra (`uv pip install 'arca-ingest[pdf]'`, etc.). A loader activates as
+  soon as its parser is importable in the environment; an absent one makes that extension
+  return `415`. See the [format table](rest-api.md#document-ingestion) in the REST docs.

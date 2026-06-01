@@ -312,7 +312,23 @@ Provided by the optional **`arca-ingest`** add-on (`uv sync --extra ingest`); de
 [`app/api/ingest.py`](../app/api/ingest.py). When the add-on is not installed, both routes
 return `501 Not Implemented`. A document is split into chunks; each chunk is embedded and
 stored as a memory in a per-document bucket (derived from the source name unless `bucket`
-is given). Today the loaders accept `.txt` and `.md`.
+is given).
+
+**Formats.** `.txt` / `.md` work out of the box. Richer formats each need an optional
+parser, installed into the server environment as an `arca-ingest` extra:
+
+| Extension | Extra | Parser |
+| - | - | - |
+| `.pdf` | `arca-ingest[pdf]` | `pypdf` |
+| `.docx` | `arca-ingest[docx]` | `python-docx` |
+| `.html`, `.htm` | `arca-ingest[html]` | `beautifulsoup4` |
+| `.epub` | `arca-ingest[epub]` | `ebooklib` + `beautifulsoup4` |
+| `.fb2` | `arca-ingest[fb2]` | `defusedxml` (stdlib XML, hardened) |
+
+A loader registers itself as soon as its parser is importable in the environment, so
+`uv pip install pypdf` (or `arca-ingest[all]` for every format) is enough to light up that
+extension — no server change or restart-time config. Posting a format whose parser isn't
+installed returns `415` with a message naming the extra to install.
 
 **Provenance & graph.** Each bucket also gets one `kind="document"` anchor memory. Every
 chunk carries its `source` and `chunk_index`, and is linked with two edges: `part_of` →

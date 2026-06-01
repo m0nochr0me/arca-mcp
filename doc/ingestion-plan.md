@@ -1,11 +1,11 @@
 # Document Ingestion Add-on — Implementation Plan
 
-> **Status:** Phases 0–3 implemented (2026-06-01). The `arca-ingest` package, the
+> **Status:** Phases 0–4 implemented (2026-06-01). The `arca-ingest` package, the
 > `POST /v1/ingest` + `/v1/ingest/text` endpoints, the `memory/ingest` MCP tool, and the
 > operator-console ingest affordance (`/memory`, with an `Ingest` link from `/canvas`)
 > are live; reference docs are in `configuration.md`, `rest-api.md`, and `mcp-tools.md`.
-> Phase 4 (additional format loaders) remains the design reference below. Deviations from
-> the original plan:
+> Phase 4 added the PDF / DOCX / HTML / EPUB / FB2 loaders as optional per-format extras
+> (see the section below). Deviations from the original plan:
 > - `ARCA_INGEST_ENABLED` was dropped — install-gating via the `ingest` extra already
 >   provides the on/off switch.
 > - **Phase 2 dedup** uses no `content_hash` column: the `source`/`chunk_index` columns
@@ -307,11 +307,28 @@ chunks — no console errors.
     straight to the per-document bucket. Vue template + dropzone CSS only; no engine
     changes.
 
-**Phase 4 — Formats support (separate later phase)**
+**Phase 4 — Formats support** ✅ DONE → verified: with each parser installed, a hand-built
+PDF, a `python-docx`-written DOCX, an `ebooklib`-written EPUB, and literal HTML/FB2 each
+load to text and chunk; the loader suite passes both with parsers present (format tests
+run) and absent (they skip, install-hint test runs); core `uv sync` still prunes every
+parser. **No server change** — an uninstalled format raises `UnsupportedFormat`, which the
+REST handler already maps to `415`.
 
-13. Additional loaders, each an optional extra registered in `arca_ingest.loaders` with
-    no server change: `pypdf` (PDF), `python-docx` (DOCX), `beautifulsoup4` (HTML),
-    installed as `arca-ingest[pdf]` / `[docx]` / `[html]`.
+13. Additional loaders, each an optional extra registered in `arca_ingest.loaders` with no
+    server change: `pypdf` (PDF), `python-docx` (DOCX), `beautifulsoup4` (HTML),
+    `ebooklib`+`beautifulsoup4` (EPUB), and `defusedxml` (FB2), installed as
+    `arca-ingest[pdf]` / `[docx]` / `[html]` / `[epub]` / `[fb2]` (or `[all]`). Deviations
+    from the original plan:
+    - **EPUB and FB2** were added beyond the original PDF/DOCX/HTML set. EPUB reads in
+      spine (reading) order and reuses the HTML→text path; FB2 is parsed with `defusedxml`
+      (stdlib `ElementTree`, hardened against XML entity-expansion / external-entity
+      attacks on untrusted uploads), keeping `<body>` prose and skipping
+      `<description>` / `<binary>`.
+    - **Availability-gated registry.** A loader registers only when its parser is
+      importable (`importlib.util.find_spec`, no heavy import). So `supported_extensions()`
+      reflects what's actually usable, and an uninstalled-but-known format raises
+      `UnsupportedFormat` with a message naming the extra to install — no 501-style stub
+      and no server-side dependency probing needed.
 
 ## Open questions
 

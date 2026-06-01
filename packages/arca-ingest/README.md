@@ -17,9 +17,20 @@ for c in chunks:
 
 ## Scope
 
-- **Formats:** `.txt`, `.md` today. PDF / DOCX / HTML register as optional extras later.
+- **Formats:** `.txt` / `.md` out of the box. PDF, DOCX, HTML, EPUB, and FB2 each ship as
+  an optional extra — `arca-ingest[pdf]`, `[docx]`, `[html]`, `[epub]`, `[fb2]`, or
+  `[all]` — so a minimal install never pulls a heavy parser. A loader registers itself
+  only when its parser is importable; an unsupported source raises `UnsupportedFormat`
+  naming the extra to install.
 - **Chunking:** [`semchunk`](https://pypi.org/project/semchunk/) with a dependency-free
   word-count token counter by default (swap in a real tokenizer for token-accurate
   sizing).
+
+```python
+# light install: just text formats
+pip install arca-ingest
+# with every format loader
+pip install 'arca-ingest[all]'
+```
 
 See [`doc/ingestion-plan.md`](../../doc/ingestion-plan.md) for the full design.
