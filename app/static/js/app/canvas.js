@@ -9,6 +9,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const GRID_GAP_X = 40;
   const GRID_GAP_Y = 40;
   const PER_ROW = 16; // unconnected nodes per grid row
+  const COMP_GAP = 120; // gap between packed connected components
+  const MIN_SCALE = 0.04; // zoom-out floor (guards against off-screen sprawl)
 
   createApp({
     setup() {
@@ -385,6 +387,34 @@ document.addEventListener("DOMContentLoaded", () => {
         items.forEach((d, i) => { d.x = Math.round(pos[i].x); d.y = Math.round(pos[i].y); });
       }
 
+      // Split *items* into connected components (undirected) using edges.value.
+      function connectedComponents(items) {
+        const adj = {};
+        const byId = {};
+        for (const d of items) { adj[d.id] = []; byId[d.id] = d; }
+        for (const e of edges.value) {
+          if (adj[e.fromNode] && adj[e.toNode]) {
+            adj[e.fromNode].push(e.toNode);
+            adj[e.toNode].push(e.fromNode);
+          }
+        }
+        const seen = new Set();
+        const comps = [];
+        for (const d of items) {
+          if (seen.has(d.id)) continue;
+          seen.add(d.id);
+          const stack = [d.id];
+          const comp = [];
+          while (stack.length) {
+            const id = stack.pop();
+            comp.push(byId[id]);
+            for (const m of adj[id]) if (!seen.has(m)) { seen.add(m); stack.push(m); }
+          }
+          comps.push(comp);
+        }
+        return comps;
+      }
+
       // Unconnected nodes get a compact, ordered grid (rows of PER_ROW); the
       // connected graph is force-laid out and parked directly below it.
       function relayout() {
@@ -409,12 +439,30 @@ document.addEventListener("DOMContentLoaded", () => {
         const isoBottom = isoRows ? (isoRows - 1) * cellH + NODE_H : 0;
 
         if (connected.length) {
-          forceLayout(connected);
-          let minX = Infinity, minY = Infinity;
-          for (const d of connected) { minX = Math.min(minX, d.x); minY = Math.min(minY, d.y); }
-          const offX = -minX;
-          const offY = (isoBottom ? isoBottom + GRID_GAP_Y : 0) - minY;
-          for (const d of connected) { d.x = Math.round(d.x + offX); d.y = Math.round(d.y + offY); }
+          // Lay out each connected component on its own so independent
+          // components don't repel one another into a giant sprawl, then
+          // shelf-pack the components into a compact, square-ish block parked
+          // below the isolated grid.
+          const boxes = connectedComponents(connected).map(comp => {
+            forceLayout(comp);
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const d of comp) {
+              minX = Math.min(minX, d.x); minY = Math.min(minY, d.y);
+              maxX = Math.max(maxX, d.x + d.width); maxY = Math.max(maxY, d.y + d.height);
+            }
+            for (const d of comp) { d.x -= minX; d.y -= minY; }
+            return { comp, w: maxX - minX, h: maxY - minY };
+          });
+          boxes.sort((a, b) => b.h - a.h);
+          const area = boxes.reduce((s, b) => s + (b.w + COMP_GAP) * (b.h + COMP_GAP), 0);
+          const rowW = Math.sqrt(area) * 1.1;
+          let x = 0, y = isoBottom ? isoBottom + GRID_GAP_Y : 0, rowH = 0;
+          for (const b of boxes) {
+            if (x > 0 && x + b.w > rowW) { x = 0; y += rowH + COMP_GAP; rowH = 0; }
+            for (const d of b.comp) { d.x = Math.round(d.x + x); d.y = Math.round(d.y + y); }
+            x += b.w + COMP_GAP;
+            rowH = Math.max(rowH, b.h);
+          }
         }
 
         persistPositions();
@@ -437,7 +485,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const bw = (maxX - minX) + pad * 2;
         const bh = (maxY - minY) + pad * 2;
         const scale = Math.min(rect.width / bw, rect.height / bh, 1.4);
-        view.scale = Math.max(scale, 0.1);
+        view.scale = Math.max(scale, MIN_SCALE);
         view.x = rect.width / 2 - ((minX + maxX) / 2) * view.scale;
         view.y = rect.height / 2 - ((minY + maxY) / 2) * view.scale;
       }
@@ -524,7 +572,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const sx = ev.clientX - rect.left;
         const sy = ev.clientY - rect.top;
         const factor = ev.deltaY < 0 ? 1.1 : 1 / 1.1;
-        const newScale = Math.min(Math.max(view.scale * factor, 0.1), 3);
+        const newScale = Math.min(Math.max(view.scale * factor, MIN_SCALE), 3);
         const wx = (sx - view.x) / view.scale;
         const wy = (sy - view.y) / view.scale;
         view.x = sx - wx * newScale;
