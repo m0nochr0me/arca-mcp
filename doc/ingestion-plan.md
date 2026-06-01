@@ -1,11 +1,19 @@
 # Document Ingestion Add-on — Implementation Plan
 
-> **Status:** Phases 0–1 implemented (2026-06-01). The `arca-ingest` package, the
+> **Status:** Phases 0–2 implemented (2026-06-01). The `arca-ingest` package, the
 > `POST /v1/ingest` + `/v1/ingest/text` endpoints, and the `memory/ingest` MCP tool are
 > live; reference docs are in `configuration.md`, `rest-api.md`, and `mcp-tools.md`.
-> Phase 2 (more formats, provenance columns, graph linking, dedup, retry/backoff) remains
-> the design reference below. One deviation from the original plan: `ARCA_INGEST_ENABLED`
-> was dropped — install-gating via the `ingest` extra already provides the on/off switch.
+> Phases 3–4 (a web UI ingestion affordance; then additional format loaders) remain the
+> design reference below. Deviations from the original plan:
+> - `ARCA_INGEST_ENABLED` was dropped — install-gating via the `ingest` extra already
+>   provides the on/off switch.
+> - **Phase 2 dedup** uses no `content_hash` column: the `source`/`chunk_index` columns
+>   already let re-ingestion compare existing chunk contents (sha256 of the ordered
+>   chunk list), so an identical re-ingest is a no-op (`skipped`) without a schema add.
+> - **Search hygiene** excludes *both* ingestion kinds (`chunk` **and** the `document`
+>   anchor) from global `get`/`get_last`, not just `chunk` — a bucket-scoped query still
+>   returns them. The anchor's content is only a filename, so it is navigational, not a
+>   curated fact.
 
 ## Goal
 
@@ -239,9 +247,10 @@ New `ARCA_`-prefixed settings in `app/core/config.py`:
   message rather than 500.
 - **Batch cap (100).** `add_memories` / `get_embedding` cap at 100 per call. The handler
   pages chunks into ≤100 groups; each group is one batched (and Redis-cached) embed call.
-- **No retry/backoff today.** `embeds.py` has no rate-limit handling. A large document =
-  many embed calls; transient 429s will fail the request. Retry/backoff is noted as a
-  Phase 2 hardening item, not first-cut scope.
+- **Embed retry/backoff (Phase 2, done).** `embeds.py` retries transient 429/5xx embed
+  responses with exponential backoff plus jitter (`ARCA_EMBED_MAX_RETRIES`,
+  `ARCA_EMBED_RETRY_BASE_DELAY`); other errors propagate. This hardens large ingests,
+  which issue many embed calls.
 - **Bucket-name sanitization.** Source names become buckets and must pass
   `_sanitize` (`[\w\-. ]+`). The loader/handler normalizes filenames (drop extension,
   replace illegal chars) before use.
@@ -274,13 +283,30 @@ The accurate token counter uses google-genai's `LocalTokenizer` (`sentencepiece`
 8. Docs: fold the relevant rows into `configuration.md`, `rest-api.md`, `mcp-tools.md`;
    README "optional add-on" note.
 
-**Phase 2 — depth (later, separate)**
+**Phase 2 — depth** ✅ DONE → verified end-to-end (TestClient on a temp store): ingest →
+chunks carry `source`/`chunk_index`; global search/recent return curated facts only while
+a bucket-scoped query returns the chunks; traversing a chunk reaches its `part_of` anchor
+and `next` chunk; a byte-identical re-ingest is a `skipped` no-op; `replace=true` rebuilds.
 
-9. More formats as extras (`pypdf`, `python-docx`, `beautifulsoup4`).
-10. Provenance columns (`source`, `chunk_index`, `kind`) + additive migration + the
-    `kind != 'chunk'` search-hygiene filter.
-11. Graph linking (document anchor + `part_of` / `next` edges).
-12. Content-hash dedup; embed retry/backoff.
+9. Provenance columns (`source`, `chunk_index`, `kind`) + additive migration + the
+   search-hygiene filter (excludes `chunk` **and** `document` anchors from global recall).
+10. Graph linking (document anchor + `part_of` / `next` edges).
+11. Content-comparison dedup (no new column; see deviations above); embed retry/backoff
+    in `embeds.py` (exponential backoff + jitter on 429/5xx).
+
+**Phase 3 — Web UI ingestion support**
+
+12. Add an upload/ingest affordance to the operator console (`/memory`, with a hook from
+    `/canvas`): a file picker / drag-and-drop that POSTs to `/v1/ingest`, reports the
+    resulting bucket and chunk count, surfaces `415`/`422` errors, and links straight to
+    the per-document bucket. Vue templates in `app/templates/` + assets in `app/static/`;
+    no engine changes.
+
+**Phase 4 — Formats support (separate later phase)**
+
+13. Additional loaders, each an optional extra registered in `arca_ingest.loaders` with
+    no server change: `pypdf` (PDF), `python-docx` (DOCX), `beautifulsoup4` (HTML),
+    installed as `arca-ingest[pdf]` / `[docx]` / `[html]`.
 
 ## Open questions
 

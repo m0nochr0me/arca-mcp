@@ -44,7 +44,15 @@ Search, pagination, and traversal results carry the following fields:
 | `connected_nodes` | `list[str]` | UUIDs this node links to |
 | `relationship_types` | `list[str]` | Parallel edge labels for `connected_nodes` |
 | `created_at` | `datetime \| null` | Creation timestamp |
+| `source` | `str \| null` | Originating document (ingested rows only) |
+| `chunk_index` | `int \| null` | Position of a chunk within its source document |
+| `kind` | `str \| null` | `"chunk"` / `"document"` for ingested rows; `null` for ordinary memories |
 | `_depth` | `int` | (`/connected` only) hop distance from the starting node |
+
+> **Search hygiene.** A search or `/memories/last` call **without** a `bucket` returns
+> curated facts only — ingested document rows (`kind` of `"chunk"`/`"document"`) are
+> excluded so they don't drown out hand-written memories. Scope the request to the
+> document's `bucket` to search its chunks.
 
 ## Examples
 
@@ -304,8 +312,17 @@ Provided by the optional **`arca-ingest`** add-on (`uv sync --extra ingest`); de
 [`app/api/ingest.py`](../app/api/ingest.py). When the add-on is not installed, both routes
 return `501 Not Implemented`. A document is split into chunks; each chunk is embedded and
 stored as a memory in a per-document bucket (derived from the source name unless `bucket`
-is given). Set `replace` to clear the bucket first for idempotent re-ingestion. Today the
-loaders accept `.txt` and `.md`.
+is given). Today the loaders accept `.txt` and `.md`.
+
+**Provenance & graph.** Each bucket also gets one `kind="document"` anchor memory. Every
+chunk carries its `source` and `chunk_index`, and is linked with two edges: `part_of` →
+the anchor and `next` → the following chunk — so a document's structure is traversable via
+`/v1/memories/{id}/connected` and renders in `/v1/canvas`.
+
+**Idempotent re-ingestion.** Re-posting byte-identical content to the same bucket is a
+no-op: the response has `"skipped": true` and an empty `memory_ids`, and nothing is
+re-embedded. Set `replace=true` to clear the bucket and rebuild it (e.g. after the source
+document changed).
 
 ### Ingest an uploaded file
 
@@ -322,11 +339,14 @@ curl -X POST http://localhost:4201/v1/ingest \
   "status": "Document ingested",
   "bucket": "notes",
   "chunks": 12,
-  "memory_ids": ["a1b2c3d4-e5f6-7890-abcd-ef1234567890", "b2c3d4e5-f6a7-8901-bcde-f23456789012"]
+  "memory_ids": ["a1b2c3d4-e5f6-7890-abcd-ef1234567890", "b2c3d4e5-f6a7-8901-bcde-f23456789012"],
+  "skipped": false
 }
 ```
 
-Unsupported file types return `415`; documents exceeding `ARCA_INGEST_MAX_CHUNKS` return `422`.
+A no-op re-ingest instead returns `"status": "Document unchanged"`, `"skipped": true`, and
+`"memory_ids": []`. Unsupported file types return `415`; documents exceeding
+`ARCA_INGEST_MAX_CHUNKS` return `422`.
 
 ### Ingest raw text
 
@@ -339,7 +359,8 @@ curl -X POST http://localhost:4201/v1/ingest/text \
 ```
 
 The response shape is identical to the file upload. Stored chunks are ordinary memories,
-retrievable via `/v1/memories/search` (optionally filtered by the document's `bucket`).
+retrievable via `/v1/memories/search` **scoped to the document's `bucket`** (a global
+search omits them — see Search hygiene above).
 
 ## JSON Canvas
 

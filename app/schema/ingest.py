@@ -17,3 +17,4 @@ class IngestResponse(BaseModel):
     bucket: str
     chunks: int
     memory_ids: list[UUID]
+    skipped: bool = Field(default=False, description="True when an identical document was already ingested (no-op)")

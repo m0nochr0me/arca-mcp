@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: str
     EMBEDDING_MODEL: str = "gemini-embedding-001"
     EMBEDDING_DIMENSION: int = 3072
+    EMBED_MAX_RETRIES: int = 3
+    EMBED_RETRY_BASE_DELAY: float = 0.5
     VECTOR_STORE_PATH: str = "./lancedb"
 
     INGEST_CHUNK_SIZE: int = 512

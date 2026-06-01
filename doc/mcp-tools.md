@@ -88,9 +88,15 @@ Chunk a document and store the chunks as memories. Available only when the optio
 | `bucket` | `str \| null` | no | Override bucket (defaults to a name derived from `source`) |
 | `replace` | `bool` | no | Clear the target bucket before ingesting (default: `false`) |
 
-**Returns:** `{ "status": "Document ingested", "bucket": "<name>", "chunks": <int>, "memory_ids": ["<uuid>", ...] }`
+**Returns:** `{ "status": "Document ingested", "bucket": "<name>", "chunks": <int>, "memory_ids": ["<uuid>", ...], "skipped": false }`
 
-The stored chunks are ordinary memories, retrievable with `memory/get`.
+Each document also gets a `kind="document"` anchor; chunks carry their `source`/`chunk_index`
+and are linked `part_of` → anchor and `next` → the following chunk (traversable with
+`memory/traverse`). Re-ingesting byte-identical text is a no-op (`"status": "Document
+unchanged"`, `"skipped": true`, empty `memory_ids`); pass `replace=true` to rebuild.
+
+The stored chunks are ordinary memories, retrievable with `memory/get` **when the call is
+scoped to the document's `bucket`** — a global `memory/get` omits them (see Result shape).
 
 ## Knowledge-graph tools
 
@@ -147,4 +153,11 @@ Search and traversal results carry the following fields:
 | `connected_nodes` | `list[str]` | UUIDs this node links to |
 | `relationship_types` | `list[str]` | Parallel edge labels for `connected_nodes` |
 | `created_at` | `datetime \| null` | Creation timestamp |
+| `source` | `str \| null` | Originating document (ingested rows only) |
+| `chunk_index` | `int \| null` | Position of a chunk within its source document |
+| `kind` | `str \| null` | `"chunk"` / `"document"` for ingested rows; `null` for ordinary memories |
 | `_depth` | `int` | (traverse only) hop distance from the starting node |
+
+A `memory/get` or `memory/get_last` call **without** a `bucket` returns curated facts only;
+ingested document rows (`kind` `"chunk"`/`"document"`) are excluded. Scope to the document's
+`bucket` to retrieve its chunks.

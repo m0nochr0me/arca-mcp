@@ -6,14 +6,16 @@ functional when the ``arca-ingest`` package is installed (the ``ingest`` extra);
 otherwise :data:`INGEST_AVAILABLE` is ``False`` and the front doors return ``501``.
 """
 
+import hashlib
 import re
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import PurePosixPath
+from uuid import UUID, uuid4
 
 from app.core.config import settings
 from app.core.log import logger
-from app.util.memory import _sanitize, add_memories, clear_memories
+from app.util.memory import _sanitize, add_memories, add_memory, clear_memories, get_chunk_contents
 
 try:
     import arca_ingest
@@ -58,6 +60,15 @@ def _bucket_for(source: str) -> str:
     return cleaned or "ingested"
 
 
+def _digest(contents: list[str]) -> str:
+    """Order-sensitive content hash over a list of chunk texts (for re-ingest dedup)."""
+    h = hashlib.sha256()
+    for content in contents:
+        h.update(content.encode("utf-8"))
+        h.update(b"\x00")  # delimiter so chunk boundaries are part of the digest
+    return h.hexdigest()
+
+
 async def ingest_document(
     data: bytes | str,
     *,
@@ -68,15 +79,22 @@ async def ingest_document(
 ) -> dict:
     """Chunk *data* and store the chunks as memories in a per-document bucket.
 
+    Each document maps to one bucket holding a ``kind="document"`` anchor node plus the
+    chunk memories. Every chunk carries provenance (``source`` / ``chunk_index``) and two
+    graph edges: ``part_of`` → the anchor and ``next`` → the following chunk.
+
+    Re-ingesting byte-identical content into the same bucket is a no-op (``skipped``),
+    unless *replace* is set, in which case the bucket is cleared and rebuilt.
+
     Args:
         data: Raw document bytes (decoded by extension) or already-decoded text.
         name: Source name/filename; selects the loader and seeds the bucket name.
         bucket: Explicit bucket; defaults to a name derived from *name*.
         namespace: Tenant namespace.
-        replace: Clear the target bucket before storing (idempotent re-ingestion).
+        replace: Clear the target bucket before storing.
 
     Returns:
-        ``{"bucket": str, "chunks": int, "memory_ids": list[UUID]}``.
+        ``{"bucket": str, "chunks": int, "memory_ids": list[UUID], "skipped": bool}``.
 
     Raises:
         UnsupportedFormat: the source extension has no loader.
@@ -97,12 +115,49 @@ async def ingest_document(
 
     target = _sanitize(bucket or _bucket_for(name), "bucket")
 
+    # Empty/whitespace document: nothing to store, and no anchor to orphan.
+    if not chunks:
+        return {"bucket": target, "chunks": 0, "memory_ids": [], "skipped": False}
+
+    new_contents = [chunk.content for chunk in chunks]
+
     if replace:
         await clear_memories(target, namespace)
+    else:
+        # Dedup: an identical document already in this bucket needs no re-embedding.
+        existing = await get_chunk_contents(target, namespace)
+        if existing and _digest(existing) == _digest(new_contents):
+            return {"bucket": target, "chunks": len(chunks), "memory_ids": [], "skipped": True}
 
-    memory_ids = []
+    # Anchor node the chunks hang off of (one per document). Created first so chunks can
+    # reference its id via the ``part_of`` edge.
+    anchor_id = await add_memory(content=name, bucket=target, namespace=namespace, source=name, kind="document")
+
+    # Pre-generate chunk ids so each row can carry its ``next`` edge at insert time,
+    # avoiding a second read-modify-write pass per chunk.
+    chunk_ids = [uuid4() for _ in chunks]
+
+    memory_ids: list[UUID] = []
     for start in range(0, len(chunks), _EMBED_BATCH):
-        items = [{"content": chunk.content, "bucket": target} for chunk in chunks[start : start + _EMBED_BATCH]]
+        items = []
+        for chunk in chunks[start : start + _EMBED_BATCH]:
+            nodes = [str(anchor_id)]
+            rels = ["part_of"]
+            if chunk.index + 1 < len(chunks):
+                nodes.append(str(chunk_ids[chunk.index + 1]))
+                rels.append("next")
+            items.append(
+                {
+                    "memory_id": chunk_ids[chunk.index],
+                    "content": chunk.content,
+                    "bucket": target,
+                    "source": name,
+                    "chunk_index": chunk.index,
+                    "kind": "chunk",
+                    "connected_nodes": nodes,
+                    "relationship_types": rels,
+                }
+            )
         memory_ids.extend(await add_memories(items, namespace))
 
-    return {"bucket": target, "chunks": len(chunks), "memory_ids": memory_ids}
+    return {"bucket": target, "chunks": len(chunks), "memory_ids": memory_ids, "skipped": False}

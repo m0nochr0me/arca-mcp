@@ -269,8 +269,9 @@ if INGEST_AVAILABLE:
         namespace = _get_namespace()
         result = await ingest_document(text, name=source, bucket=bucket, namespace=namespace, replace=replace)
         return {
-            "status": "Document ingested",
+            "status": "Document unchanged" if result["skipped"] else "Document ingested",
             "bucket": result["bucket"],
             "chunks": result["chunks"],
             "memory_ids": [str(m) for m in result["memory_ids"]],
+            "skipped": result["skipped"],
         }

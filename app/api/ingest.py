@@ -15,6 +15,10 @@ router = APIRouter(prefix="/v1", tags=["ingest"], dependencies=[Depends(verify_t
 _UNAVAILABLE = "Document ingestion add-on is not installed. Install the 'ingest' extra (uv sync --extra ingest)."
 
 
+def _status_for(result: dict) -> str:
+    return "Document unchanged" if result["skipped"] else "Document ingested"
+
+
 if INGEST_AVAILABLE:
 
     @router.post("/ingest", response_model=IngestResponse)
@@ -34,7 +38,7 @@ if INGEST_AVAILABLE:
             raise HTTPException(status_code=415, detail=str(exc))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
-        return IngestResponse(status="Document ingested", **result)
+        return IngestResponse(status=_status_for(result), **result)
 
     @router.post("/ingest/text", response_model=IngestResponse)
     async def ingest_text(
@@ -48,7 +52,7 @@ if INGEST_AVAILABLE:
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
-        return IngestResponse(status="Document ingested", **result)
+        return IngestResponse(status=_status_for(result), **result)
 
 else:
 
