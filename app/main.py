@@ -16,6 +16,7 @@ from fastmcp.server.auth.providers.debug import DebugTokenVerifier
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
 from ulid import ULID
 
+from app.api.ingest import router as ingest_router
 from app.api.memory import router as memory_router
 from app.context.memory import server as memory_server
 from app.core.config import settings
@@ -101,6 +102,7 @@ templates = Jinja2Templates(directory=str(base_dir / "templates"))
 app.mount("/static", StaticFiles(directory=str(base_dir / "static")), name="static")
 
 app.include_router(memory_router)
+app.include_router(ingest_router)
 app.mount("/app", mcp_app)
 
 

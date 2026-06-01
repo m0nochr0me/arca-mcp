@@ -8,6 +8,7 @@ from click import UUID
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_headers
 
+from app.util.ingest import INGEST_AVAILABLE, ingest_document
 from app.util.memory import (
     add_memory,
     buckets_list,
@@ -235,3 +236,41 @@ async def traverse(
         "status": "Graph traversed" if results else "No connected nodes found",
         "results": results,
     }
+
+
+# ---- Document ingestion (optional add-on) ----
+
+
+if INGEST_AVAILABLE:
+
+    @server.tool(tags={"memory", "ingest"})
+    async def ingest(
+        text: Annotated[str, "Document text to chunk and store"],
+        source: Annotated[str, "Source name; seeds the bucket name"],
+        bucket: Annotated[str | None, "Override bucket (defaults to a name derived from source)"] = None,
+        replace: Annotated[bool, "Clear the target bucket before ingesting"] = False,
+    ) -> dict[str, Any]:
+        """
+        Chunk a document and store the chunks as memories.
+
+        Splits *text* into semantically coherent chunks and stores each as a memory in a
+        per-document bucket (derived from *source* unless *bucket* is given). Set *replace*
+        to clear the bucket first for idempotent re-ingestion.
+
+        Args:
+            text: Document text to chunk and store
+            source: Source name; seeds the bucket name
+            bucket: Optional explicit bucket name
+            replace: Clear the target bucket before ingesting
+
+        Returns:
+            dict: status, bucket, chunk count, and the stored memory UUIDs.
+        """
+        namespace = _get_namespace()
+        result = await ingest_document(text, name=source, bucket=bucket, namespace=namespace, replace=replace)
+        return {
+            "status": "Document ingested",
+            "bucket": result["bucket"],
+            "chunks": result["chunks"],
+            "memory_ids": [str(m) for m in result["memory_ids"]],
+        }

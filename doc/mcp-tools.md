@@ -76,6 +76,22 @@ List all buckets in the current namespace.
 
 **Returns:** `{ "buckets": ["default", "work", ...] }`
 
+## `memory/ingest`
+
+Chunk a document and store the chunks as memories. Available only when the optional
+`arca-ingest` add-on is installed (`uv sync --extra ingest`).
+
+| Parameter | Type | Required | Description |
+| - | - | - | - |
+| `text` | `str` | yes | Document text to chunk and store |
+| `source` | `str` | yes | Source name; seeds the per-document bucket |
+| `bucket` | `str \| null` | no | Override bucket (defaults to a name derived from `source`) |
+| `replace` | `bool` | no | Clear the target bucket before ingesting (default: `false`) |
+
+**Returns:** `{ "status": "Document ingested", "bucket": "<name>", "chunks": <int>, "memory_ids": ["<uuid>", ...] }`
+
+The stored chunks are ordinary memories, retrievable with `memory/get`.
+
 ## Knowledge-graph tools
 
 Edges are directed and labelled. They are stored as parallel lists

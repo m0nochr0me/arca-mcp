@@ -19,6 +19,10 @@ through a `.env` file in the project root. Settings are loaded by Pydantic
 | `ARCA_EMBEDDING_MODEL` | `str` | `gemini-embedding-001` | Gemini embedding model name |
 | `ARCA_EMBEDDING_DIMENSION` | `int` | `3072` | Embedding vector dimensionality |
 | `ARCA_VECTOR_STORE_PATH` | `str` | `./lancedb` | LanceDB storage directory |
+| `ARCA_INGEST_CHUNK_SIZE` | `int` | `512` | Target chunk size in token-counter units (kept well under the embedder's 2048-token limit) |
+| `ARCA_INGEST_CHUNK_OVERLAP` | `float` | `0.1` | Chunk overlap: a ratio of chunk size when `< 1`, else an absolute token count |
+| `ARCA_INGEST_MAX_CHUNKS` | `int` | `2000` | Maximum chunks accepted per document (cost / runaway guard) |
+| `ARCA_INGEST_TOKENIZER_MODEL` | `str` | `gemini-2.5-flash` | Gemini model whose local tokenizer counts chunk tokens (proxy for the embedding model) |
 | `ARCA_REDIS_HOST` | `str` | `localhost` | Redis host |
 | `ARCA_REDIS_PORT` | `int` | `6379` | Redis port |
 | `ARCA_REDIS_DB_CACHE` | `int` | `4` | Redis database number for cache |
@@ -38,3 +42,8 @@ through a `.env` file in the project root. Settings are loaded by Pydantic
   [`app/util/embeds.py`](../app/util/embeds.py).
 - **Storage path** — `ARCA_VECTOR_STORE_PATH` is a local directory. When running in
   Docker, mount a volume there to persist data across container restarts.
+- **Document ingestion** — the `ARCA_INGEST_*` settings apply only when the optional
+  `arca-ingest` add-on is installed (`uv sync --extra ingest`). Chunk sizes are measured
+  with google-genai's local Gemini tokenizer when `sentencepiece` + `protobuf` are
+  available, falling back to a word count otherwise. See
+  [`doc/ingestion-plan.md`](ingestion-plan.md).

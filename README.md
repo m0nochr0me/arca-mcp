@@ -10,6 +10,7 @@ A Model Context Protocol (MCP) server providing semantic memory storage and retr
 - **Multi-Tenant Isolation** — Namespace-scoped operations via `X-Namespace` HTTP header
 - **Bucket Organization** — Group memories into logical buckets for structured storage
 - **JSON Canvas Export** — Render a bucket's memories and connections as a [JSON Canvas](https://jsoncanvas.org/) document
+- **Document Ingestion** *(optional add-on)* — Chunk and store whole documents (txt/md) via the `arca-ingest` package (`uv sync --extra ingest`), exposed as `POST /v1/ingest` and the `memory/ingest` tool
 - **Embedding Caching** — Redis-backed cache for generated embeddings to minimize API calls
 - **Bearer Token Auth** — Constant-time token verification for secure access
 

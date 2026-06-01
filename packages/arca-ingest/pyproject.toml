@@ -1,0 +1,21 @@
+[project]
+name = "arca-ingest"
+version = "0.1.0"
+description = "Optional document loading and chunking add-on for Arca MCP."
+requires-python = ">=3.14"
+dependencies = [
+    "semchunk>=4.0.0",
+]
+
+[project.optional-dependencies]
+# Future format loaders are kept optional even within the add-on:
+# pdf = ["pypdf>=6.0.0"]
+# docx = ["python-docx>=1.1.2"]
+# html = ["beautifulsoup4>=4.13.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arca_ingest"]

@@ -20,8 +20,17 @@ dependencies = [
     "jinja2>=3.1.6",
 ]
 
+[project.optional-dependencies]
+ingest = ["arca-ingest", "protobuf>=4.25", "python-multipart>=0.0.9", "sentencepiece>=0.2.0"]
+
 [tool.uv]
 exclude-newer = "7 days"
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+arca-ingest = { workspace = true }
 
 [tool.ruff]
 line-length = 120
@@ -34,4 +43,4 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [dependency-groups]
-dev = ["pre-commit>=4.5.1", "ruff>=0.15.8"]
+dev = ["pre-commit>=4.5.1", "pytest>=8.3", "ruff>=0.15.8"]

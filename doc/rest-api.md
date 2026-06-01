@@ -25,6 +25,8 @@ Interactive OpenAPI docs are available at `/docs` when the server is running.
 | `POST` | `/v1/memories/connect` | Create a directed edge between two nodes |
 | `POST` | `/v1/memories/disconnect` | Remove edges between two nodes |
 | `GET` | `/v1/memories/{memory_id}/connected` | Traverse the knowledge graph from a node |
+| `POST` | `/v1/ingest` | Chunk an uploaded document and store the chunks (optional `ingest` add-on) |
+| `POST` | `/v1/ingest/text` | Chunk raw text and store the chunks (optional `ingest` add-on) |
 
 Request and response models are defined in
 [`app/schema/memory.py`](../app/schema/memory.py) and
@@ -295,6 +297,49 @@ curl "http://localhost:4201/v1/memories/a1b2c3d4-e5f6-7890-abcd-ef1234567890/con
   ]
 }
 ```
+
+## Document ingestion
+
+Provided by the optional **`arca-ingest`** add-on (`uv sync --extra ingest`); defined in
+[`app/api/ingest.py`](../app/api/ingest.py). When the add-on is not installed, both routes
+return `501 Not Implemented`. A document is split into chunks; each chunk is embedded and
+stored as a memory in a per-document bucket (derived from the source name unless `bucket`
+is given). Set `replace` to clear the bucket first for idempotent re-ingestion. Today the
+loaders accept `.txt` and `.md`.
+
+### Ingest an uploaded file
+
+```bash
+curl -X POST http://localhost:4201/v1/ingest \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "X-Namespace: my_project" \
+  -F "file=@notes.md" \
+  -F "replace=true"
+```
+
+```json
+{
+  "status": "Document ingested",
+  "bucket": "notes",
+  "chunks": 12,
+  "memory_ids": ["a1b2c3d4-e5f6-7890-abcd-ef1234567890", "b2c3d4e5-f6a7-8901-bcde-f23456789012"]
+}
+```
+
+Unsupported file types return `415`; documents exceeding `ARCA_INGEST_MAX_CHUNKS` return `422`.
+
+### Ingest raw text
+
+```bash
+curl -X POST http://localhost:4201/v1/ingest/text \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "X-Namespace: my_project" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "# Report\n\nLong document text...", "source": "report.md", "replace": true}'
+```
+
+The response shape is identical to the file upload. Stored chunks are ordinary memories,
+retrievable via `/v1/memories/search` (optionally filtered by the document's `bucket`).
 
 ## JSON Canvas
 
