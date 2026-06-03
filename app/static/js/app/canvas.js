@@ -11,6 +11,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const PER_ROW = 16; // unconnected nodes per grid row
   const COMP_GAP = 120; // gap between packed connected components
   const MIN_SCALE = 0.04; // zoom-out floor (guards against off-screen sprawl)
+  const RENDER_MARGIN = 600; // screen-px halo around the viewport kept in the DOM
+  const LOD_THRESHOLD = 0.05; // below this zoom, nodes render as bare blocks
 
   createApp({
     setup() {
@@ -104,7 +106,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const x = a.x + a.width / 2;
             const y = a.y;
             out.push({
-              id: e.id, external: e.external, label: e.label,
+              id: e.id, fromNode: e.fromNode, toNode: e.toNode, external: e.external, label: e.label,
               d: `M ${x - 22},${y} C ${x - 46},${y - 56} ${x + 46},${y - 56} ${x + 22},${y}`,
               mx: x, my: y - 50,
             });
@@ -115,12 +117,59 @@ document.addEventListener("DOMContentLoaded", () => {
           const p1 = borderPoint(a, bc.x, bc.y);
           const p2 = borderPoint(b, ac.x, ac.y);
           out.push({
-            id: e.id, external: e.external, label: e.label,
+            id: e.id, fromNode: e.fromNode, toNode: e.toNode, external: e.external, label: e.label,
             d: `M ${p1.x},${p1.y} L ${p2.x},${p2.y}`,
             mx: (p1.x + p2.x) / 2, my: (p1.y + p2.y) / 2,
           });
         }
         return out;
+      });
+
+      // ── Viewport culling + level-of-detail ─────────────────
+      // Only nodes/edges whose world rect intersects the viewport (plus a
+      // screen-px halo) are kept in the DOM, so DOM size tracks what's on
+      // screen rather than the bucket size. Below LOD_THRESHOLD nodes render
+      // as bare blocks (no inner content) since their text is unreadable.
+      const lod = computed(() => view.scale < LOD_THRESHOLD);
+
+      const viewBounds = computed(() => {
+        const s = view.scale || 1;
+        const m = RENDER_MARGIN;
+        return {
+          minX: (-m - view.x) / s,
+          minY: (-m - view.y) / s,
+          maxX: (wrapW.value + m - view.x) / s,
+          maxY: (wrapH.value + m - view.y) / s,
+        };
+      });
+
+      const visibleNodes = computed(() => {
+        const b = viewBounds.value;
+        // Interaction-critical nodes stay rendered even if scrolled out of view.
+        const keep = new Set();
+        if (drag.value) keep.add(drag.value.id);
+        if (linkSource.value) keep.add(linkSource.value);
+        if (linkTarget.value) keep.add(linkTarget.value);
+        const out = [];
+        for (const n of nodes.value) {
+          if (keep.has(n.id) ||
+              (n.x + n.width >= b.minX && n.x <= b.maxX && n.y + n.height >= b.minY && n.y <= b.maxY)) {
+            out.push(n);
+          }
+        }
+        return out;
+      });
+
+      const visibleIds = computed(() => {
+        const s = new Set();
+        for (const n of visibleNodes.value) s.add(n.id);
+        return s;
+      });
+
+      const visibleEdges = computed(() => {
+        const ids = visibleIds.value;
+        const sel = selectedEdge.value;
+        return edgeGeo.value.filter(e => ids.has(e.fromNode) || ids.has(e.toNode) || e.id === sel);
       });
 
       const selectedEdgeInfo = computed(() => {
@@ -786,7 +835,7 @@ document.addEventListener("DOMContentLoaded", () => {
         buckets, activeBucket, nodes, edges,
         memoryCount, externalCount,
         // View
-        wrap, view, gTransform, layerStyle, nodeStyle, edgeGeo,
+        wrap, view, gTransform, layerStyle, nodeStyle, visibleNodes, visibleEdges, lod,
         xTicks, yTicks, maximized, maxLabel, toggleMaximize,
         panning, linkSource, linkTarget, relType, selectedEdge, selectedEdgeInfo,
         // Pointer

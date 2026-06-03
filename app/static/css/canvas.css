@@ -153,6 +153,12 @@
   border-color: rgba(105, 240, 209, 0.45);
 }
 
+/* Low-detail node (zoomed out): a bare coloured block, no inner content */
+.cnode.lod {
+  padding: 0;
+  background: rgba(22, 31, 38, 0.97);
+}
+
 .cnode.linksrc {
   border-color: var(--primary);
   box-shadow: 0 0 0 1px var(--primary);

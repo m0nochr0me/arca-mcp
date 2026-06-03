@@ -64,41 +64,44 @@
           </marker>
         </defs>
         <g :transform="gTransform">
-          <g v-for="e in edgeGeo" :key="e.id" class="cedge"
+          <g v-for="e in visibleEdges" :key="e.id" class="cedge"
             :class="{ external: e.external, selected: selectedEdge === e.id }"
             @pointerdown.stop="selectEdge(e)">
             <path class="cedge-hit" :d="e.d" />
             <path class="cedge-line" :d="e.d" :marker-end="e.external ? 'url(#arrow-ext)' : 'url(#arrow)'" />
-            <text v-if="e.label" class="cedge-label" :x="e.mx" :y="e.my">{{ e.label }}</text>
+            <text v-if="e.label && !lod" class="cedge-label" :x="e.mx" :y="e.my">{{ e.label }}</text>
           </g>
         </g>
       </svg>
 
       <!-- Node layer -->
       <div class="node-layer" :style="layerStyle">
-        <div v-for="n in nodes" :key="n.id" class="cnode"
-          :class="{ external: n.kind === 'external', linksrc: linkSource === n.id, linktgt: linkTarget === n.id }"
+        <div v-for="n in visibleNodes" :key="n.id" class="cnode"
+          :class="{ external: n.kind === 'external', linksrc: linkSource === n.id, linktgt: linkTarget === n.id, lod: lod }"
           :style="nodeStyle(n)"
           @pointerdown.stop="onNodePointerDown($event, n)"
           @click.stop="onNodeClick(n)"
           @dblclick.stop="openEdit(n)">
 
-          <!-- External stub -->
-          <template v-if="n.kind === 'external'">
-            <div class="cnode-ext-label">{{ n.text }}</div>
-            <div class="cnode-ext-hint">{{ n.target_bucket ? 'click to open bucket' : 'target missing' }}</div>
-          </template>
+          <!-- Full detail (omitted when zoomed out: text would be unreadable) -->
+          <template v-if="!lod">
+            <!-- External stub -->
+            <template v-if="n.kind === 'external'">
+              <div class="cnode-ext-label">{{ n.text }}</div>
+              <div class="cnode-ext-hint">{{ n.target_bucket ? 'click to open bucket' : 'target missing' }}</div>
+            </template>
 
-          <!-- Memory node -->
-          <template v-else>
-            <div class="cnode-head">
-              <span class="cnode-id codeish">{{ n.id.slice(0, 8) }}</span>
-              <span class="cnode-acts">
-                <button class="cnode-act" title="Connect from here" @pointerdown.stop @click.stop="startLink(n)">+</button>
-                <button class="cnode-act danger-text" title="Delete" @pointerdown.stop @click.stop="deleteNode(n)">x</button>
-              </span>
-            </div>
-            <div class="cnode-body">{{ n.text }}</div>
+            <!-- Memory node -->
+            <template v-else>
+              <div class="cnode-head">
+                <span class="cnode-id codeish">{{ n.id.slice(0, 8) }}</span>
+                <span class="cnode-acts">
+                  <button class="cnode-act" title="Connect from here" @pointerdown.stop @click.stop="startLink(n)">+</button>
+                  <button class="cnode-act danger-text" title="Delete" @pointerdown.stop @click.stop="deleteNode(n)">x</button>
+                </span>
+              </div>
+              <div class="cnode-body">{{ n.text }}</div>
+            </template>
           </template>
         </div>
       </div>
