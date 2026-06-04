@@ -81,34 +81,56 @@
     <!-- Ingest document form -->
     <div v-if="showIngestForm" class="panel stack gap-3">
       <p class="eyebrow">INGEST DOCUMENT</p>
-      <input type="file" ref="ingestInput" :accept="acceptAttr"
+      <input type="file" ref="ingestInput" :accept="acceptAttr" multiple
         @change="onIngestPick" style="display: none;">
       <div class="dropzone" :class="{ dragging: ingestDragging }" @click="$refs.ingestInput.click()"
         @dragover.prevent="ingestDragging = true" @dragleave.prevent="ingestDragging = false"
         @drop.prevent="onIngestDrop">
-        <template v-if="ingestFile">
-          <strong class="codeish">{{ ingestFile.name }}</strong>
-          <span class="muted">{{ (ingestFile.size / 1024).toFixed(1) }} KB &middot; click to choose another</span>
+        <template v-if="ingestFiles.length === 1">
+          <strong class="codeish">{{ ingestFiles[0].name }}</strong>
+          <span class="muted">{{ (ingestFiles[0].size / 1024).toFixed(1) }} KB &middot; click to choose another</span>
+        </template>
+        <template v-else-if="ingestFiles.length > 1">
+          <strong class="codeish">{{ ingestFiles.length }} files</strong>
+          <span class="muted">{{ ingestTotalKb }} KB total &middot; click to choose other files</span>
         </template>
         <template v-else>
-          <strong>Drop a file here, or click to choose</strong>
+          <strong>Drop file(s) here, or click to choose</strong>
           <span class="muted">Supported: {{ formatsLabel }} &middot; split into chunks and stored in a per-document bucket.</span>
         </template>
       </div>
       <div class="row">
         <div class="field" style="flex: 1;">
-          <label>Bucket (optional)</label>
-          <input type="text" v-model="ingestBucket" placeholder="defaults to the file name">
+          <label>Bucket {{ ingestFiles.length > 1 ? '(required for multiple files)' : '(optional)' }}</label>
+          <select v-model="ingestBucket">
+            <option value="">{{ ingestFiles.length > 1 ? '— choose a bucket —' : '(from file name)' }}</option>
+            <option v-for="b in buckets" :key="b" :value="b">{{ b }}</option>
+            <option value="__new__">+ New bucket…</option>
+          </select>
+        </div>
+        <div v-if="ingestBucket === '__new__'" class="field" style="flex: 1;">
+          <label>New bucket name</label>
+          <input type="text" v-model="ingestNewBucket" placeholder="bucket name">
         </div>
         <label class="checkbox" style="margin-top: 16px;" title="Clear the bucket before ingesting">
           <input type="checkbox" v-model="ingestReplace">
           <span>Replace existing</span>
         </label>
       </div>
+      <div class="row">
+        <label class="checkbox" style="margin-top: 6px;" title="Create a node the chunks attach to (part_of)">
+          <input type="checkbox" v-model="ingestCreateParent">
+          <span>Create parent node</span>
+        </label>
+        <div v-if="ingestCreateParent" class="field" style="flex: 1;">
+          <input type="text" v-model="ingestParentContent"
+            :placeholder="ingestFiles.length > 1 ? 'parent content (defaults to bucket name)' : 'parent content (defaults to file name)'">
+        </div>
+      </div>
       <div class="row right gap-2">
         <button class="ghost" @click="showIngestForm = false">Cancel</button>
-        <button class="primary" @click="ingestDocument" :disabled="!ingestFile || ingesting">
-          {{ ingesting ? 'Ingesting...' : 'Ingest' }}
+        <button class="primary" @click="ingestDocument" :disabled="!canIngest">
+          {{ ingesting ? ('Ingesting' + (ingestProgress ? ' ' + ingestProgress : '') + '...') : 'Ingest' }}
         </button>
       </div>
     </div>

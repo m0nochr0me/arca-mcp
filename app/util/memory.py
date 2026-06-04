@@ -31,6 +31,16 @@ def _sanitize_uuid(value: str) -> str:
     return value
 
 
+def _sql_literal(value: str) -> str:
+    """Quote *value* as a SQL string literal, escaping embedded single quotes.
+
+    Used for free-form values like a document source/filename that can't go through
+    :func:`_sanitize`'s identifier whitelist (they legitimately contain quotes, parens,
+    spaces, non-Latin characters, ...). DataFusion (LanceDB) escapes a quote by doubling it.
+    """
+    return "'" + value.replace("'", "''") + "'"
+
+
 __all__ = (
     "add_memories",
     "add_memory",
@@ -528,20 +538,26 @@ async def buckets_list(
     return {r["bucket"] for r in results}
 
 
-async def get_chunk_contents(bucket: str, namespace: str = "default") -> list[str]:
+async def get_chunk_contents(bucket: str, namespace: str = "default", source: str | None = None) -> list[str]:
     """Return the contents of a bucket's ingested chunk memories, ordered by ``chunk_index``.
 
     Used by the ingestion add-on to detect an unchanged re-ingest (content dedup). Returns
-    an empty list when the bucket holds no chunks.
+    an empty list when the bucket holds no chunks. When *source* is given the result is
+    scoped to that document's chunks, so a bucket holding several ingested documents dedups
+    each one independently.
     """
 
     table = await _get_memory_table()
 
+    where = (
+        f"bucket='{_sanitize(bucket, 'bucket')}' AND namespace='{_sanitize(namespace, 'namespace')}' AND kind='chunk'"
+    )
+    if source is not None:
+        where += f" AND source={_sql_literal(source)}"
+
     rows = (
         await table.query()
-        .where(
-            f"bucket='{_sanitize(bucket, 'bucket')}' AND namespace='{_sanitize(namespace, 'namespace')}' AND kind='chunk'"
-        )
+        .where(where)
         .select(["content", "chunk_index"])
         .to_list()
     )  # fmt: skip

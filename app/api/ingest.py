@@ -32,13 +32,23 @@ if INGEST_AVAILABLE:
         file: UploadFile = File(..., description="Document to chunk and store (txt/md)"),
         bucket: str | None = Form(default=None),
         replace: bool = Form(default=False),
+        parent: bool = Form(default=True),
+        parent_content: str | None = Form(default=None),
+        parent_id: str | None = Form(default=None),
         namespace: str = Depends(get_namespace),
     ) -> IngestResponse:
         """Chunk an uploaded document and store the chunks as memories."""
         data = await file.read()
         try:
             result = await ingest_document(
-                data, name=file.filename or "upload", bucket=bucket, namespace=namespace, replace=replace
+                data,
+                name=file.filename or "upload",
+                bucket=bucket,
+                namespace=namespace,
+                replace=replace,
+                parent=parent,
+                parent_content=parent_content,
+                parent_id=parent_id,
             )
         except UnsupportedFormat as exc:
             raise HTTPException(status_code=415, detail=str(exc))
@@ -54,7 +64,14 @@ if INGEST_AVAILABLE:
         """Chunk raw document text and store the chunks as memories."""
         try:
             result = await ingest_document(
-                body.text, name=body.source, bucket=body.bucket, namespace=namespace, replace=body.replace
+                body.text,
+                name=body.source,
+                bucket=body.bucket,
+                namespace=namespace,
+                replace=body.replace,
+                parent=body.parent,
+                parent_content=body.parent_content,
+                parent_id=body.parent_id,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))

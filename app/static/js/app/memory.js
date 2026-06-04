@@ -33,16 +33,33 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // ── Ingest document ────────────────────────────────────
       const showIngestForm = ref(false);
-      const ingestFile = ref(null);
-      const ingestBucket = ref("");
+      const ingestFiles = ref([]);         // one or more selected files, ingested into one bucket
+      const ingestBucket = ref("");        // "" = derive from file name, a bucket name, or "__new__"
+      const ingestNewBucket = ref("");     // name typed when ingestBucket === "__new__"
       const ingestReplace = ref(false);
+      const ingestCreateParent = ref(false);  // opt-in: anchor the chunks to a parent node
+      const ingestParentContent = ref("");    // parent node content (blank → file name / bucket name)
       const ingesting = ref(false);
+      const ingestProgress = ref("");      // "3 / 10" while a multi-file batch uploads
       const ingestDragging = ref(false);
       const ingestAvailable = ref(true);   // optimistic until /ingest/formats answers
       const supportedFormats = ref([]);    // file extensions the server can actually parse
       const acceptAttr = computed(() => supportedFormats.value.join(","));
       const formatsLabel = computed(() =>
         supportedFormats.value.length ? supportedFormats.value.join(", ") : ".txt, .md"
+      );
+      const ingestTotalKb = computed(() =>
+        (ingestFiles.value.reduce((s, f) => s + f.size, 0) / 1024).toFixed(1)
+      );
+      // Resolved target bucket: "" means "let the server derive it from the file name".
+      const ingestEffectiveBucket = computed(() =>
+        ingestBucket.value === "__new__" ? ingestNewBucket.value.trim() : ingestBucket.value
+      );
+      // A target bucket is required when ingesting more than one file (no single filename to derive from).
+      const canIngest = computed(() =>
+        ingestFiles.value.length > 0 && !ingesting.value &&
+        !(ingestBucket.value === "__new__" && !ingestNewBucket.value.trim()) &&
+        !(ingestFiles.value.length > 1 && !ingestEffectiveBucket.value)
       );
 
       // ── Inline edit ────────────────────────────────────────
@@ -287,66 +304,119 @@ document.addEventListener("DOMContentLoaded", () => {
         return i === -1 ? "" : name.slice(i).toLowerCase();
       }
 
-      function setIngestFile(f) {
-        if (!f) return;
+      function setIngestFiles(fileList) {
+        const incoming = Array.from(fileList || []);
+        if (!incoming.length) return;
         const exts = supportedFormats.value;
-        // Drag-and-drop bypasses the file picker's `accept`, so validate here too.
-        if (exts.length && !exts.includes(extOf(f.name))) {
-          showError(`Unsupported file type "${extOf(f.name) || f.name}". Supported: ${exts.join(", ")}`);
-          return;
+        const accepted = [];
+        const rejected = [];
+        for (const f of incoming) {
+          // Drag-and-drop bypasses the file picker's `accept`, so validate here too.
+          if (exts.length && !exts.includes(extOf(f.name))) rejected.push(f.name);
+          else accepted.push(f);
         }
-        ingestFile.value = f;
+        if (rejected.length) {
+          showError(`Unsupported file type(s): ${rejected.join(", ")}. Supported: ${exts.join(", ")}`);
+        }
+        if (accepted.length) ingestFiles.value = accepted;
       }
 
       function onIngestPick(e) {
-        setIngestFile(e.target.files && e.target.files[0]);
-        e.target.value = "";  // allow re-picking the same file later
+        setIngestFiles(e.target.files);
+        e.target.value = "";  // allow re-picking the same file(s) later
       }
 
       function onIngestDrop(e) {
         ingestDragging.value = false;
-        setIngestFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+        setIngestFiles(e.dataTransfer.files);
       }
 
       async function ingestDocument() {
-        if (!ingestFile.value) return;
+        if (!ingestFiles.value.length) return;
+        const files = ingestFiles.value.slice();
+        const bucketOverride = ingestEffectiveBucket.value;
+        if (files.length > 1 && !bucketOverride) {
+          showError("Choose a target bucket for multiple files");
+          return;
+        }
+        const createParent = ingestCreateParent.value;
+        // Parent content defaults to the bucket name for a batch (no single filename to use);
+        // for a lone file a blank content lets the server fall back to the file name.
+        const parentContent = ingestParentContent.value.trim() || (files.length > 1 ? bucketOverride : "");
+
         ingesting.value = true;
+        ingestProgress.value = "";
+        let okCount = 0, skipCount = 0, chunkTotal = 0;
+        const failures = [];
+        let targetBucket = bucketOverride || null;
+        let sharedParentId = null;  // first file creates the parent; the rest attach to it
         try {
-          const form = new FormData();
-          form.append("file", ingestFile.value);
-          if (ingestBucket.value.trim()) form.append("bucket", ingestBucket.value.trim());
-          form.append("replace", String(ingestReplace.value));
-          // Multipart upload: let the browser set Content-Type (with boundary), so we
-          // can't reuse the JSON `api()` helper.
-          const res = await fetch("/v1/ingest", {
-            method: "POST",
-            headers: {
-              "Authorization": `Bearer ${authKey.value}`,
-              "X-Namespace": namespace.value || "default",
-            },
-            body: form,
-          });
-          if (!res.ok) {
-            const detail = await res.text();
-            throw new Error(`${res.status}: ${detail}`);
+          for (let i = 0; i < files.length; i++) {
+            ingestProgress.value = files.length > 1 ? `${i + 1} / ${files.length}` : "";
+            const form = new FormData();
+            form.append("file", files[i]);
+            if (bucketOverride) form.append("bucket", bucketOverride);
+            // "Replace existing" clears the whole bucket; for a batch do it once (on the first
+            // file) so later files append rather than wiping their predecessors.
+            form.append("replace", String(ingestReplace.value && i === 0));
+            if (!createParent) {
+              form.append("parent", "false");
+            } else if (sharedParentId) {
+              form.append("parent_id", sharedParentId);  // share one parent across the batch
+            } else if (parentContent) {
+              form.append("parent_content", parentContent);
+            }
+            try {
+              // Multipart upload: let the browser set Content-Type (with boundary), so we
+              // can't reuse the JSON `api()` helper.
+              const res = await fetch("/v1/ingest", {
+                method: "POST",
+                headers: {
+                  "Authorization": `Bearer ${authKey.value}`,
+                  "X-Namespace": namespace.value || "default",
+                },
+                body: form,
+              });
+              if (!res.ok) {
+                const detail = await res.text();
+                throw new Error(`${res.status}: ${detail}`);
+              }
+              const data = await res.json();
+              targetBucket = data.bucket;  // server-sanitized name (single file: derived from filename)
+              chunkTotal += data.chunks;
+              if (data.parent_id && !sharedParentId) sharedParentId = data.parent_id;
+              if (data.skipped) skipCount++; else okCount++;
+            } catch (e) {
+              failures.push(`${files[i].name}: ${e.message}`);
+            }
           }
-          const data = await res.json();
-          showIngestForm.value = false;
-          ingestFile.value = null;
-          ingestBucket.value = "";
-          ingestReplace.value = false;
-          if (data.skipped) {
-            flash(`Unchanged — "${data.bucket}" already ingested`);
-          } else {
-            flash(`Ingested -> "${data.bucket}" (${data.chunks} chunk${data.chunks === 1 ? "" : "s"})`);
-          }
-          await loadBuckets();
-          isSearchResult.value = false;
-          selectBucket(data.bucket);  // jump straight to the per-document bucket
-        } catch (e) {
-          showError("Ingest failed: " + e.message);
         } finally {
           ingesting.value = false;
+          ingestProgress.value = "";
+        }
+
+        // Reset the form before reporting / navigating.
+        showIngestForm.value = false;
+        ingestFiles.value = [];
+        ingestBucket.value = "";
+        ingestNewBucket.value = "";
+        ingestReplace.value = false;
+        ingestCreateParent.value = false;
+        ingestParentContent.value = "";
+
+        if (failures.length) {
+          showError(`Ingest failed for ${failures.length} file(s): ${failures.join("; ")}`);
+        }
+        if (okCount || skipCount) {
+          const parts = [];
+          if (okCount) parts.push(`${okCount} ingested (${chunkTotal} chunk${chunkTotal === 1 ? "" : "s"})`);
+          if (skipCount) parts.push(`${skipCount} unchanged`);
+          flash(`${parts.join(", ")}${targetBucket ? ` → "${targetBucket}"` : ""}`);
+          // Post-success refresh; loadBuckets / loadMemories handle their own errors so a
+          // hiccup here never mislabels a successful ingest as a failure.
+          await loadBuckets();
+          isSearchResult.value = false;
+          if (targetBucket) selectBucket(targetBucket);
         }
       }
 
@@ -519,8 +589,10 @@ document.addEventListener("DOMContentLoaded", () => {
         showAddForm, newMemory, saving,
         addMemory,
         // Ingest document
-        showIngestForm, ingestFile, ingestBucket, ingestReplace, ingesting, ingestDragging,
-        ingestAvailable, supportedFormats, acceptAttr, formatsLabel,
+        showIngestForm, ingestFiles, ingestBucket, ingestNewBucket, ingestReplace,
+        ingestCreateParent, ingestParentContent,
+        ingesting, ingestProgress, ingestDragging,
+        ingestAvailable, supportedFormats, acceptAttr, formatsLabel, ingestTotalKb, canIngest,
         onIngestPick, onIngestDrop, ingestDocument,
         // Inline edit
         editingId, editContent, editBucket, updatingId,

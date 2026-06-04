@@ -87,13 +87,19 @@ Chunk a document and store the chunks as memories. Available only when the optio
 | `source` | `str` | yes | Source name; seeds the per-document bucket |
 | `bucket` | `str \| null` | no | Override bucket (defaults to a name derived from `source`) |
 | `replace` | `bool` | no | Clear the target bucket before ingesting (default: `false`) |
+| `parent` | `bool` | no | Create a parent node the chunks attach to (default: `true`) |
+| `parent_content` | `str \| null` | no | Content for the parent node (defaults to `source`) |
 
-**Returns:** `{ "status": "Document ingested", "bucket": "<name>", "chunks": <int>, "memory_ids": ["<uuid>", ...], "skipped": false }`
+**Returns:** `{ "status": "Document ingested", "bucket": "<name>", "chunks": <int>, "memory_ids": ["<uuid>", ...], "skipped": false, "parent_id": "<uuid>" }`
 
-Each document also gets a `kind="document"` anchor; chunks carry their `source`/`chunk_index`
-and are linked `part_of` → anchor and `next` → the following chunk (traversable with
-`memory/traverse`). Re-ingesting byte-identical text is a no-op (`"status": "Document
-unchanged"`, `"skipped": true`, empty `memory_ids`); pass `replace=true` to rebuild.
+By default each document gets a `kind="document"` parent node (content `source`, overridable
+with `parent_content`); pass `parent=false` to skip it (`parent_id` is then `null`). Chunks
+carry their `source`/`chunk_index` and are linked `part_of` → parent (when present) and
+`next` → the following chunk (traversable with
+`memory/traverse`). Re-ingesting byte-identical text for the same `source` is a no-op
+(`"status": "Document unchanged"`, `"skipped": true`, empty `memory_ids`) — dedup is scoped
+to the `source`, so several documents can share a `bucket`; pass `replace=true` to clear the
+whole bucket and rebuild.
 
 The stored chunks are ordinary memories, retrievable with `memory/get` **when the call is
 scoped to the document's `bucket`** — a global `memory/get` omits them (see Result shape).

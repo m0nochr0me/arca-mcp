@@ -336,15 +336,28 @@ listing exactly the extensions the running server can parse. The web-UI ingest d
 calls it to populate the file picker's `accept` filter and reject unsupported drops; when
 `available` is `false` (add-on absent) the UI hides the ingest affordance.
 
-**Provenance & graph.** Each bucket also gets one `kind="document"` anchor memory. Every
-chunk carries its `source` and `chunk_index`, and is linked with two edges: `part_of` →
-the anchor and `next` → the following chunk — so a document's structure is traversable via
-`/v1/memories/{id}/connected` and renders in `/v1/canvas`.
+**Provenance & graph.** Every chunk carries its `source` and `chunk_index` and a `next` →
+following-chunk edge, so a document's structure is traversable via
+`/v1/memories/{id}/connected` and renders in `/v1/canvas`. By default each document also
+gets a `kind="document"` parent node (content = `source`) that the chunks link to via
+`part_of`; the response returns its `parent_id`. Control the parent with these fields:
 
-**Idempotent re-ingestion.** Re-posting byte-identical content to the same bucket is a
+| Field | Type | Description |
+| - | - | - |
+| `parent` | `bool` | Create a parent node the chunks attach to (default `true`); set `false` to skip |
+| `parent_content` | `str \| null` | Content for the created parent node (defaults to the `source`/file name) |
+| `parent_id` | `str \| null` | Attach the chunks to this existing node instead of creating one |
+
+To group several files under **one** parent, create it on the first upload (with
+`parent_content`) and pass the returned `parent_id` on the rest — which is exactly what the
+web UI's multi-file ingest does.
+
+**Idempotent re-ingestion.** Re-posting byte-identical content for the same `source` is a
 no-op: the response has `"skipped": true` and an empty `memory_ids`, and nothing is
-re-embedded. Set `replace=true` to clear the bucket and rebuild it (e.g. after the source
-document changed).
+re-embedded. Dedup is scoped to the `source`, so several documents can share one `bucket`
+(post each file with the same `bucket`) and each one is skipped/updated independently. Set
+`replace=true` to clear the **whole** bucket and rebuild it (e.g. after a source changed);
+when loading several files into a shared bucket, send `replace=true` only on the first.
 
 ### Ingest an uploaded file
 
@@ -362,7 +375,8 @@ curl -X POST http://localhost:4201/v1/ingest \
   "bucket": "notes",
   "chunks": 12,
   "memory_ids": ["a1b2c3d4-e5f6-7890-abcd-ef1234567890", "b2c3d4e5-f6a7-8901-bcde-f23456789012"],
-  "skipped": false
+  "skipped": false,
+  "parent_id": "c3d4e5f6-a7b8-9012-cdef-3456789012ab"
 }
 ```
 

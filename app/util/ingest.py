@@ -87,15 +87,23 @@ async def ingest_document(
     bucket: str | None,
     namespace: str,
     replace: bool,
+    parent: bool = True,
+    parent_content: str | None = None,
+    parent_id: str | UUID | None = None,
 ) -> dict:
     """Chunk *data* and store the chunks as memories in a per-document bucket.
 
-    Each document maps to one bucket holding a ``kind="document"`` anchor node plus the
-    chunk memories. Every chunk carries provenance (``source`` / ``chunk_index``) and two
-    graph edges: ``part_of`` → the anchor and ``next`` → the following chunk.
+    Optionally a parent node anchors the chunks: every chunk links ``part_of`` → the parent
+    and ``next`` → the following chunk. The parent is resolved as follows (first match wins):
 
-    Re-ingesting byte-identical content into the same bucket is a no-op (``skipped``),
-    unless *replace* is set, in which case the bucket is cleared and rebuilt.
+    - *parent_id*: link to an existing node (e.g. a parent shared across several files);
+    - *parent*: create a fresh ``kind="document"`` node whose content is *parent_content*
+      (falling back to *name*);
+    - otherwise no parent is created and chunks carry only ``next`` edges.
+
+    Chunks always carry provenance (``source`` / ``chunk_index``). Re-ingesting byte-identical
+    content for the same *name* is a no-op (``skipped``), unless *replace* is set, in which
+    case the bucket is cleared and rebuilt.
 
     Args:
         data: Raw document bytes (decoded by extension) or already-decoded text.
@@ -103,9 +111,13 @@ async def ingest_document(
         bucket: Explicit bucket; defaults to a name derived from *name*.
         namespace: Tenant namespace.
         replace: Clear the target bucket before storing.
+        parent: Create a parent node the chunks attach to (ignored when *parent_id* is set).
+        parent_content: Content for the created parent node; defaults to *name*.
+        parent_id: Link chunks to this existing node instead of creating a parent.
 
     Returns:
-        ``{"bucket": str, "chunks": int, "memory_ids": list[UUID], "skipped": bool}``.
+        ``{"bucket": str, "chunks": int, "memory_ids": list[UUID], "skipped": bool,
+        "parent_id": str | None}``.
 
     Raises:
         UnsupportedFormat: the source extension has no loader.
@@ -125,24 +137,44 @@ async def ingest_document(
         )
 
     target = _sanitize(bucket or _bucket_for(name), "bucket")
+    incoming_parent = str(parent_id) if parent_id else None
 
     # Empty/whitespace document: nothing to store, and no anchor to orphan.
     if not chunks:
-        return {"bucket": target, "chunks": 0, "memory_ids": [], "skipped": False}
+        return {"bucket": target, "chunks": 0, "memory_ids": [], "skipped": False, "parent_id": incoming_parent}
 
     new_contents = [chunk.content for chunk in chunks]
 
     if replace:
         await clear_memories(target, namespace)
     else:
-        # Dedup: an identical document already in this bucket needs no re-embedding.
-        existing = await get_chunk_contents(target, namespace)
+        # Dedup: an identical copy of THIS document already in the bucket needs no
+        # re-embedding. Scoped to the source so a shared bucket (multiple documents) dedups
+        # each document independently.
+        existing = await get_chunk_contents(target, namespace, source=name)
         if existing and _digest(existing) == _digest(new_contents):
-            return {"bucket": target, "chunks": len(chunks), "memory_ids": [], "skipped": True}
+            return {
+                "bucket": target,
+                "chunks": len(chunks),
+                "memory_ids": [],
+                "skipped": True,
+                "parent_id": incoming_parent,
+            }
 
-    # Anchor node the chunks hang off of (one per document). Created first so chunks can
-    # reference its id via the ``part_of`` edge.
-    anchor_id = await add_memory(content=name, bucket=target, namespace=namespace, source=name, kind="document")
+    # Resolve the parent node the chunks hang off of (one ``part_of`` edge each), if any:
+    # an existing node when *parent_id* is given, else a fresh anchor when *parent* is set.
+    # Created first so chunks can reference its id at insert time.
+    anchor_id: str | None = incoming_parent
+    if anchor_id is None and parent:
+        anchor_id = str(
+            await add_memory(
+                content=parent_content if parent_content is not None else name,
+                bucket=target,
+                namespace=namespace,
+                source=name,
+                kind="document",
+            )
+        )
 
     # Pre-generate chunk ids so each row can carry its ``next`` edge at insert time,
     # avoiding a second read-modify-write pass per chunk.
@@ -152,8 +184,8 @@ async def ingest_document(
     for start in range(0, len(chunks), _EMBED_BATCH):
         items = []
         for chunk in chunks[start : start + _EMBED_BATCH]:
-            nodes = [str(anchor_id)]
-            rels = ["part_of"]
+            nodes = [anchor_id] if anchor_id else []
+            rels = ["part_of"] if anchor_id else []
             if chunk.index + 1 < len(chunks):
                 nodes.append(str(chunk_ids[chunk.index + 1]))
                 rels.append("next")
@@ -171,4 +203,4 @@ async def ingest_document(
             )
         memory_ids.extend(await add_memories(items, namespace))
 
-    return {"bucket": target, "chunks": len(chunks), "memory_ids": memory_ids, "skipped": False}
+    return {"bucket": target, "chunks": len(chunks), "memory_ids": memory_ids, "skipped": False, "parent_id": anchor_id}
