@@ -31,12 +31,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // ── View transform (world -> screen) ───────────────────
       const view = reactive({ x: 0, y: 0, scale: 1 });
+      // Throttled snapshot of `view` driving viewport culling only. Pan/zoom
+      // mutate `view` every frame (cheap: one transform on the layer), but the
+      // O(n) visible-set recompute is deferred to one rAF tick via this snapshot.
+      const cullView = reactive({ x: 0, y: 0, scale: 1 });
       const wrap = ref(null);
       const wrapW = ref(0);
       const wrapH = ref(0);
 
       // ── Interaction state ──────────────────────────────────
       const drag = ref(null); // { id, dx, dy, sx, sy }
+      let dragCtx = null; // imperative-drag scratch: { id, el, incident[], lastX, lastY }
       const movedDuringDrag = ref(false);
       const justDragged = ref(false);
       const panning = ref(null); // { sx, sy, ox, oy }
@@ -133,13 +138,13 @@ document.addEventListener("DOMContentLoaded", () => {
       const lod = computed(() => view.scale < LOD_THRESHOLD);
 
       const viewBounds = computed(() => {
-        const s = view.scale || 1;
+        const s = cullView.scale || 1;
         const m = RENDER_MARGIN;
         return {
-          minX: (-m - view.x) / s,
-          minY: (-m - view.y) / s,
-          maxX: (wrapW.value + m - view.x) / s,
-          maxY: (wrapH.value + m - view.y) / s,
+          minX: (-m - cullView.x) / s,
+          minY: (-m - cullView.y) / s,
+          maxX: (wrapW.value + m - cullView.x) / s,
+          maxY: (wrapH.value + m - cullView.y) / s,
         };
       });
 
@@ -242,6 +247,26 @@ document.addEventListener("DOMContentLoaded", () => {
         const rect = w.getBoundingClientRect();
         wrapW.value = rect.width;
         wrapH.value = rect.height;
+      }
+
+      // ── Culling throttle ───────────────────────────────────
+      // Coalesce per-frame view changes into a single visible-set recompute.
+      let cullRaf = 0;
+      function scheduleCull() {
+        if (cullRaf) return;
+        cullRaf = requestAnimationFrame(() => {
+          cullRaf = 0;
+          cullView.x = view.x;
+          cullView.y = view.y;
+          cullView.scale = view.scale;
+        });
+      }
+
+      function syncCull() {
+        if (cullRaf) { cancelAnimationFrame(cullRaf); cullRaf = 0; }
+        cullView.x = view.x;
+        cullView.y = view.y;
+        cullView.scale = view.scale;
       }
 
       // ── Position persistence (localStorage, per namespace+bucket) ──
@@ -359,7 +384,7 @@ document.addEventListener("DOMContentLoaded", () => {
             persistPositions();
             nextTick(fitView);
           } else {
-            relayout();
+            await relayout();
           }
 
           await nextTick();
@@ -375,10 +400,14 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       // ── Layout ─────────────────────────────────────────────
+      const nextFrame = () => new Promise((r) => requestAnimationFrame(r));
+
       // Force-directed (Fruchterman-Reingold) layout of *items*, with a gravity
       // term toward the centroid so disconnected components stay packed together
-      // instead of drifting apart. Mutates each item's x/y in place.
-      function forceLayout(items) {
+      // instead of drifting apart. Mutates each item's x/y in place. For large
+      // components the O(n^2) iterations yield to the browser periodically so the
+      // tab stays responsive instead of freezing on a big bucket.
+      async function forceLayout(items) {
         const n = items.length;
         if (n === 0) return;
         if (n === 1) { items[0].x = 0; items[0].y = 0; return; }
@@ -431,6 +460,7 @@ document.addEventListener("DOMContentLoaded", () => {
             pos[i].y += (disp[i].y / d) * Math.min(d, temp);
           }
           temp *= 0.97;
+          if (n > 150 && (it & 7) === 7) await nextFrame();
         }
 
         items.forEach((d, i) => { d.x = Math.round(pos[i].x); d.y = Math.round(pos[i].y); });
@@ -466,7 +496,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Unconnected nodes get a compact, ordered grid (rows of PER_ROW); the
       // connected graph is force-laid out and parked directly below it.
-      function relayout() {
+      async function relayout() {
         const ns = nodes.value;
         if (!ns.length) return;
 
@@ -492,16 +522,17 @@ document.addEventListener("DOMContentLoaded", () => {
           // components don't repel one another into a giant sprawl, then
           // shelf-pack the components into a compact, square-ish block parked
           // below the isolated grid.
-          const boxes = connectedComponents(connected).map(comp => {
-            forceLayout(comp);
+          const boxes = [];
+          for (const comp of connectedComponents(connected)) {
+            await forceLayout(comp);
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
             for (const d of comp) {
               minX = Math.min(minX, d.x); minY = Math.min(minY, d.y);
               maxX = Math.max(maxX, d.x + d.width); maxY = Math.max(maxY, d.y + d.height);
             }
             for (const d of comp) { d.x -= minX; d.y -= minY; }
-            return { comp, w: maxX - minX, h: maxY - minY };
-          });
+            boxes.push({ comp, w: maxX - minX, h: maxY - minY });
+          }
           boxes.sort((a, b) => b.h - a.h);
           const area = boxes.reduce((s, b) => s + (b.w + COMP_GAP) * (b.h + COMP_GAP), 0);
           const rowW = Math.sqrt(area) * 1.1;
@@ -537,6 +568,7 @@ document.addEventListener("DOMContentLoaded", () => {
         view.scale = Math.max(scale, MIN_SCALE);
         view.x = rect.width / 2 - ((minX + maxX) / 2) * view.scale;
         view.y = rect.height / 2 - ((minY + maxY) / 2) * view.scale;
+        syncCull();
       }
 
       function centerOn(n) {
@@ -545,6 +577,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const rect = w.getBoundingClientRect();
         view.x = rect.width / 2 - (n.x + n.width / 2) * view.scale;
         view.y = rect.height / 2 - (n.y + n.height / 2) * view.scale;
+        syncCull();
       }
 
       function toggleMaximize() {
@@ -584,6 +617,64 @@ document.addEventListener("DOMContentLoaded", () => {
         const w = toWorld(ev);
         movedDuringDrag.value = false;
         drag.value = { id: n.id, dx: w.x - n.x, dy: w.y - n.y, sx: ev.clientX, sy: ev.clientY };
+
+        // Cache the DOM node + its incident edge paths so each drag frame mutates
+        // only those elements directly. Without this, moving one node mutates
+        // reactive state and forces an O(nodes+edges) recompute/re-diff every
+        // pointermove — which is what makes dragging jank when everything is on
+        // screen (e.g. 1500 nodes fully zoomed out).
+        const edgeEls = {};
+        if (wrap.value) wrap.value.querySelectorAll(".cedge").forEach(g => { edgeEls[g.dataset.eid] = g; });
+        const incident = [];
+        for (const e of edges.value) {
+          if (e.fromNode !== n.id && e.toNode !== n.id) continue;
+          const g = edgeEls[e.id];
+          if (!g) continue;
+          incident.push({
+            e,
+            line: g.querySelector(".cedge-line"),
+            hit: g.querySelector(".cedge-hit"),
+            label: g.querySelector(".cedge-label"),
+          });
+        }
+        dragCtx = { id: n.id, el: ev.currentTarget, incident, lastX: null, lastY: null };
+      }
+
+      // Geometry for a single edge while its `id` endpoint sits at the live drag
+      // position (ax, ay). Mirrors edgeGeo so imperative and reactive paths agree.
+      function dragEdgeGeo(e, ax, ay) {
+        const rectOf = (id) => {
+          const m = nodeMap.value[id];
+          return id === dragCtx.id ? { x: ax, y: ay, width: m.width, height: m.height } : m;
+        };
+        const a = rectOf(e.fromNode);
+        const b = rectOf(e.toNode);
+        if (e.fromNode === e.toNode) {
+          const x = a.x + a.width / 2;
+          const y = a.y;
+          return { d: `M ${x - 22},${y} C ${x - 46},${y - 56} ${x + 46},${y - 56} ${x + 22},${y}`, mx: x, my: y - 50 };
+        }
+        const ac = { x: a.x + a.width / 2, y: a.y + a.height / 2 };
+        const bc = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+        const p1 = borderPoint(a, bc.x, bc.y);
+        const p2 = borderPoint(b, ac.x, ac.y);
+        return { d: `M ${p1.x},${p1.y} L ${p2.x},${p2.y}`, mx: (p1.x + p2.x) / 2, my: (p1.y + p2.y) / 2 };
+      }
+
+      function dragMoveImperative(ax, ay) {
+        if (!dragCtx) return;
+        dragCtx.lastX = ax;
+        dragCtx.lastY = ay;
+        if (dragCtx.el) {
+          dragCtx.el.style.left = `${ax}px`;
+          dragCtx.el.style.top = `${ay}px`;
+        }
+        for (const it of dragCtx.incident) {
+          const g = dragEdgeGeo(it.e, ax, ay);
+          if (it.line) it.line.setAttribute("d", g.d);
+          if (it.hit) it.hit.setAttribute("d", g.d);
+          if (it.label) { it.label.setAttribute("x", g.mx); it.label.setAttribute("y", g.my); }
+        }
       }
 
       function onNodeClick(n) {
@@ -597,22 +688,31 @@ document.addEventListener("DOMContentLoaded", () => {
             movedDuringDrag.value = true;
           }
           const w = toWorld(ev);
-          const n = nodeMap.value[drag.value.id];
-          if (n) { n.x = w.x - drag.value.dx; n.y = w.y - drag.value.dy; }
+          dragMoveImperative(w.x - drag.value.dx, w.y - drag.value.dy);
           return;
         }
         if (panning.value) {
           view.x = panning.value.ox + (ev.clientX - panning.value.sx);
           view.y = panning.value.oy + (ev.clientY - panning.value.sy);
+          scheduleCull();
         }
       }
 
       function onPointerUp() {
         if (drag.value) {
           justDragged.value = movedDuringDrag.value;
-          if (movedDuringDrag.value) persistPositions();
+          // Commit the imperative position back to reactive state once, so edges
+          // reconcile and the move persists. This is the only recompute a drag
+          // triggers (one, on release — not one per frame).
+          if (movedDuringDrag.value && dragCtx && dragCtx.lastX != null) {
+            const n = nodeMap.value[dragCtx.id];
+            if (n) { n.x = dragCtx.lastX; n.y = dragCtx.lastY; }
+            persistPositions();
+          }
+          dragCtx = null;
         }
         drag.value = null;
+        if (panning.value) syncCull();
         panning.value = null;
       }
 
@@ -627,6 +727,7 @@ document.addEventListener("DOMContentLoaded", () => {
         view.x = sx - wx * newScale;
         view.y = sy - wy * newScale;
         view.scale = newScale;
+        scheduleCull();
       }
 
       // ── Navigation to other buckets ────────────────────────

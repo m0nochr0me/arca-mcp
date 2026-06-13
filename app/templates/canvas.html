@@ -64,7 +64,8 @@
           </marker>
         </defs>
         <g :transform="gTransform">
-          <g v-for="e in visibleEdges" :key="e.id" class="cedge"
+          <g v-for="e in visibleEdges" :key="e.id" class="cedge" :data-eid="e.id"
+            v-memo="[e.d, e.mx, e.my, e.label, e.external, selectedEdge === e.id, lod]"
             :class="{ external: e.external, selected: selectedEdge === e.id }"
             @pointerdown.stop="selectEdge(e)">
             <path class="cedge-hit" :d="e.d" />
@@ -77,6 +78,7 @@
       <!-- Node layer -->
       <div class="node-layer" :style="layerStyle">
         <div v-for="n in visibleNodes" :key="n.id" class="cnode"
+          v-memo="[n.x, n.y, n.width, n.height, n.text, n.kind, n.target_bucket, lod, linkSource === n.id, linkTarget === n.id]"
           :class="{ external: n.kind === 'external', linksrc: linkSource === n.id, linktgt: linkTarget === n.id, lod: lod }"
           :style="nodeStyle(n)"
           @pointerdown.stop="onNodePointerDown($event, n)"

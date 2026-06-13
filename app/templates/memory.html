@@ -44,12 +44,8 @@
         <strong>{{ buckets.length }}</strong>
       </div>
       <div class="metric">
-        <span class="muted">SHOWING</span>
-        <strong>{{ memories.length }}</strong>
-      </div>
-      <div class="metric">
-        <span class="muted">NAMESPACE</span>
-        <strong>{{ namespace || 'default' }}</strong>
+        <span class="muted">TOTAL</span>
+        <strong>{{ total }}</strong>
       </div>
       <div class="metric" :class="{ standout: connected }">
         <span class="muted">STATUS</span>

@@ -147,6 +147,8 @@
   overflow: hidden;
   cursor: grab;
   transition: border-color 0.12s;
+  /* Isolate each node's layout/paint so one node moving doesn't reflow the rest. */
+  contain: layout style paint;
 }
 
 .cnode:hover {
