@@ -1,4 +1,4 @@
-"""Source loaders: turn raw bytes into plain text, keyed by file extension.
+"""Source loaders: turn raw bytes into text, keyed by file extension.
 
 Text formats (``.txt`` / ``.md``) are always available. Richer formats -- PDF, DOCX,
 HTML, EPUB, FB2 -- each need an optional parser and ship as ``arca-ingest`` extras
@@ -6,10 +6,14 @@ HTML, EPUB, FB2 -- each need an optional parser and ship as ``arca-ingest`` extr
 from :func:`supported_extensions`; loading it raises :class:`UnsupportedFormat` with a
 hint naming the extra to install. Parser imports are lazy (inside each loader), so merely
 importing this module never pulls a heavy dependency.
+
+Structured formats (HTML, EPUB, DOCX) are rendered as Markdown rather than flattened to
+plain text, so headings, lists, tables, and link targets survive into the stored chunks.
 """
 
 import importlib.util
 import io
+import re
 from collections.abc import Callable
 from pathlib import PurePosixPath
 from typing import NamedTuple
@@ -23,18 +27,20 @@ def _load_text(data: bytes) -> str:
     return data.decode("utf-8")
 
 
-def _html_to_text(markup: bytes | str) -> str:
-    """Strip an HTML/XHTML fragment to readable text (shared by HTML and EPUB)."""
+def _html_to_md(markup: bytes | str) -> str:
+    """Render an HTML/XHTML fragment as Markdown (shared by HTML, EPUB, and DOCX)."""
     from bs4 import BeautifulSoup
+    from markdownify import markdownify
 
     soup = BeautifulSoup(markup, "html.parser")
     for tag in soup(("script", "style")):
         tag.decompose()
-    return soup.get_text(separator="\n")
+    markdown = markdownify(str(soup), heading_style="ATX")
+    return re.sub(r"\n{3,}", "\n\n", markdown).strip()
 
 
 def _load_html(data: bytes) -> str:
-    return _html_to_text(data)
+    return _html_to_md(data)
 
 
 def _load_pdf(data: bytes) -> str:
@@ -45,10 +51,13 @@ def _load_pdf(data: bytes) -> str:
 
 
 def _load_docx(data: bytes) -> str:
-    import docx
+    import mammoth
 
-    document = docx.Document(io.BytesIO(data))
-    return "\n".join(paragraph.text for paragraph in document.paragraphs)
+    # mammoth maps Word styles to semantic HTML (headings, lists, tables); the shared
+    # HTML->Markdown pass then renders that structure. python-docx's paragraph join was
+    # dropped because it silently lost tables.
+    html = mammoth.convert_to_html(io.BytesIO(data)).value
+    return _html_to_md(html)
 
 
 def _load_epub(data: bytes) -> str:
@@ -61,7 +70,7 @@ def _load_epub(data: bytes) -> str:
     items = [item for item in items if item is not None]
     if not items:
         items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
-    return "\n\n".join(_html_to_text(item.get_content()) for item in items)
+    return "\n\n".join(_html_to_md(item.get_content()) for item in items)
 
 
 # FB2 block-level tags whose text we keep: paragraphs, verse lines, subtitles, signatures.
@@ -103,9 +112,9 @@ class _OptionalFormat(NamedTuple):
 
 _OPTIONAL_FORMATS: tuple[_OptionalFormat, ...] = (
     _OptionalFormat((".pdf",), _load_pdf, ("pypdf",), "pdf"),
-    _OptionalFormat((".docx",), _load_docx, ("docx",), "docx"),
-    _OptionalFormat((".html", ".htm"), _load_html, ("bs4",), "html"),
-    _OptionalFormat((".epub",), _load_epub, ("ebooklib", "bs4"), "epub"),
+    _OptionalFormat((".docx",), _load_docx, ("mammoth", "bs4", "markdownify"), "docx"),
+    _OptionalFormat((".html", ".htm"), _load_html, ("bs4", "markdownify"), "html"),
+    _OptionalFormat((".epub",), _load_epub, ("ebooklib", "bs4", "markdownify"), "epub"),
     _OptionalFormat((".fb2",), _load_fb2, ("defusedxml",), "fb2"),
 )
 

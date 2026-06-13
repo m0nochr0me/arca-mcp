@@ -22,6 +22,9 @@ for c in chunks:
   `[all]` — so a minimal install never pulls a heavy parser. A loader registers itself
   only when its parser is importable; an unsupported source raises `UnsupportedFormat`
   naming the extra to install.
+- **Fidelity:** structured formats (DOCX via `mammoth`, HTML and EPUB via `markdownify`)
+  are rendered as Markdown — headings, lists, tables, and link targets survive into the
+  chunks instead of being flattened to plain text.
 - **Chunking:** [`semchunk`](https://pypi.org/project/semchunk/) with a dependency-free
   word-count token counter by default (swap in a real tokenizer for token-accurate
   sizing).

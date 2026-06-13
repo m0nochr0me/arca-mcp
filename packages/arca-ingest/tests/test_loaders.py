@@ -44,13 +44,22 @@ def test_uninstalled_optional_format_names_its_extra():
         load(b"%PDF-1.7", name="paper.pdf")
 
 
-def test_html_loader_extracts_text_and_drops_scripts():
+def test_html_loader_renders_markdown_and_drops_scripts():
     pytest.importorskip("bs4")
+    pytest.importorskip("markdownify")
     assert {".html", ".htm"} <= supported_extensions()
-    markup = b"<html><body><h1>Hello</h1><p>World</p><script>bad()</script></body></html>"
+    markup = (
+        b"<html><body><h1>Hello</h1><p>See the <a href='https://example.com/x'>docs</a>.</p>"
+        b"<ol><li>First</li><li>Second</li></ol>"
+        b"<table><tr><th>Key</th><th>Value</th></tr><tr><td>alpha</td><td>1</td></tr></table>"
+        b"<script>bad()</script><style>.x{}</style></body></html>"
+    )
     text = load(markup, name="page.html")
-    assert "Hello" in text and "World" in text
-    assert "bad()" not in text
+    assert "# Hello" in text  # headings keep their level
+    assert "[docs](https://example.com/x)" in text  # link targets survive
+    assert "1. First" in text and "2. Second" in text  # ordered-list numbering survives
+    assert "| alpha | 1 |" in text  # tables become pipe tables
+    assert "bad()" not in text and ".x{}" not in text
 
 
 def test_fb2_loader_extracts_body_and_skips_metadata():
@@ -74,7 +83,8 @@ def test_fb2_loader_extracts_body_and_skips_metadata():
 
 
 def test_docx_loader_extracts_paragraphs():
-    docx = pytest.importorskip("docx")
+    pytest.importorskip("mammoth")
+    docx = pytest.importorskip("docx", reason="python-docx (dev dependency) builds the fixture")
     assert ".docx" in supported_extensions()
     document = docx.Document()
     document.add_paragraph("First paragraph")
@@ -86,8 +96,28 @@ def test_docx_loader_extracts_paragraphs():
     assert "Second paragraph" in text
 
 
+def test_docx_loader_preserves_structure():
+    # Regression test: the previous python-docx loader silently dropped tables.
+    pytest.importorskip("mammoth")
+    docx = pytest.importorskip("docx", reason="python-docx (dev dependency) builds the fixture")
+    document = docx.Document()
+    document.add_heading("Revenue", level=1)
+    document.add_paragraph("Cloud segment", style="List Bullet")
+    table = document.add_table(rows=2, cols=2)
+    for row, values in zip(table.rows, [("Region", "Q1"), ("EMEA", "10")]):
+        for cell, value in zip(row.cells, values):
+            cell.text = value
+    buffer = io.BytesIO()
+    document.save(buffer)
+    text = load(buffer.getvalue(), name="report.docx")
+    assert "# Revenue" in text  # heading level survives
+    assert "* Cloud segment" in text  # list bullets survive
+    assert "| EMEA | 10 |" in text  # table content arrives as a pipe table
+
+
 def test_epub_loader_extracts_text_in_spine_order():
     pytest.importorskip("bs4")
+    pytest.importorskip("markdownify")
     epub = pytest.importorskip("ebooklib.epub", reason="ebooklib not installed")
     assert ".epub" in supported_extensions()
 
@@ -105,7 +135,7 @@ def test_epub_loader_extracts_text_in_spine_order():
     epub.write_epub(buffer, book)
 
     text = load(buffer.getvalue(), name="book.epub")
-    assert "Heading" in text
+    assert "# Heading" in text  # chapter headings arrive as Markdown
     assert "Epub body text." in text
 
 

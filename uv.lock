@@ -137,7 +137,7 @@ wheels = [
 
 [[package]]
 name = "arca-ingest"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "packages/arca-ingest" }
 dependencies = [
     { name = "semchunk" },
@@ -148,21 +148,26 @@ all = [
     { name = "beautifulsoup4" },
     { name = "defusedxml" },
     { name = "ebooklib" },
+    { name = "mammoth" },
+    { name = "markdownify" },
     { name = "pypdf" },
-    { name = "python-docx" },
 ]
 docx = [
-    { name = "python-docx" },
+    { name = "beautifulsoup4" },
+    { name = "mammoth" },
+    { name = "markdownify" },
 ]
 epub = [
     { name = "beautifulsoup4" },
     { name = "ebooklib" },
+    { name = "markdownify" },
 ]
 fb2 = [
     { name = "defusedxml" },
 ]
 html = [
     { name = "beautifulsoup4" },
+    { name = "markdownify" },
 ]
 pdf = [
     { name = "pypdf" },
@@ -171,19 +176,23 @@ pdf = [
 [package.metadata]
 requires-dist = [
     { name = "arca-ingest", extras = ["pdf", "docx", "html", "epub", "fb2"], marker = "extra == 'all'", editable = "packages/arca-ingest" },
+    { name = "beautifulsoup4", marker = "extra == 'docx'", specifier = ">=4.12.0" },
     { name = "beautifulsoup4", marker = "extra == 'epub'", specifier = ">=4.12.0" },
     { name = "beautifulsoup4", marker = "extra == 'html'", specifier = ">=4.12.0" },
     { name = "defusedxml", marker = "extra == 'fb2'", specifier = ">=0.7.1" },
     { name = "ebooklib", marker = "extra == 'epub'", specifier = ">=0.18" },
+    { name = "mammoth", marker = "extra == 'docx'", specifier = ">=1.11.0" },
+    { name = "markdownify", marker = "extra == 'docx'", specifier = ">=1.2.0" },
+    { name = "markdownify", marker = "extra == 'epub'", specifier = ">=1.2.0" },
+    { name = "markdownify", marker = "extra == 'html'", specifier = ">=1.2.0" },
     { name = "pypdf", marker = "extra == 'pdf'", specifier = ">=5.0.0" },
-    { name = "python-docx", marker = "extra == 'docx'", specifier = ">=1.1.2" },
     { name = "semchunk", specifier = ">=4.0.0" },
 ]
 provides-extras = ["pdf", "docx", "html", "epub", "fb2", "all"]
 
 [[package]]
 name = "arca-mcp"
-version = "0.8.2"
+version = "0.8.3"
 source = { editable = "." }
 dependencies = [
     { name = "aiocache" },
@@ -219,6 +228,7 @@ ingest-all = [
 dev = [
     { name = "pre-commit" },
     { name = "pytest" },
+    { name = "python-docx" },
     { name = "ruff" },
 ]
 
@@ -250,6 +260,7 @@ provides-extras = ["ingest", "ingest-all"]
 dev = [
     { name = "pre-commit", specifier = ">=4.5.1" },
     { name = "pytest", specifier = ">=8.3" },
+    { name = "python-docx", specifier = ">=1.1.2" },
     { name = "ruff", specifier = ">=0.15.8" },
 ]
 
@@ -434,6 +445,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/9b/98/518d8e5081007684232226f475082b30087d0f585e8457db087298259f49/click-8.4.1.tar.gz", hash = "sha256:918b5633eddf6b41c32d4f454bf0de810065c74e3f7dbf8ee5452f8be88d3e96", size = 353007, upload-time = "2026-05-22T04:08:37.769Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c7/0d/67e5b4109ea4a837e80daa87c2c696711955e40449a97e8926672534def2/click-8.4.1-py3-none-any.whl", hash = "sha256:482be17c6991b8c19c5429a1e995d9b0efdbb63172824c41f99965dc0ade8ec2", size = 116639, upload-time = "2026-05-22T04:08:35.26Z" },
+]
+
+[[package]]
+name = "cobble"
+version = "0.1.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/54/7a/a507c709be2c96e1bb6102eb7b7f4026c5e5e223ef7d745a17d239e9d844/cobble-0.1.4.tar.gz", hash = "sha256:de38be1539992c8a06e569630717c485a5f91be2192c461ea2b220607dfa78aa", size = 3805, upload-time = "2024-06-01T18:11:09.528Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d5/e1/3714a2f371985215c219c2a70953d38e3eed81ef165aed061d21de0e998b/cobble-0.1.4-py3-none-any.whl", hash = "sha256:36c91b1655e599fd428e2b95fdd5f0da1ca2e9f1abb0bc871dec21a0e78a2b44", size = 3984, upload-time = "2024-06-01T18:11:07.911Z" },
 ]
 
 [[package]]
@@ -1102,6 +1122,18 @@ wheels = [
 ]
 
 [[package]]
+name = "mammoth"
+version = "1.12.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cobble" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/af/0c/b8d04b142c28f705ac434aedfb492f62e3fa9082421b6aa0ec7be9202dc7/mammoth-1.12.0.tar.gz", hash = "sha256:10955a55d9173167b550de3aeb8f2ed48b420756fd66378156b2f78661a33dd5", size = 53388, upload-time = "2026-03-12T21:42:37.289Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/14/a4/0cce02ffb7c75211e7723250bf254c7a320a17368345859beba75637262a/mammoth-1.12.0-py2.py3-none-any.whl", hash = "sha256:d195ae2403b98276d7646e252035b6f70adb255987bb267e9eac6bc6531fe38f", size = 54919, upload-time = "2026-03-12T21:42:35.745Z" },
+]
+
+[[package]]
 name = "markdown-it-py"
 version = "4.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1111,6 +1143,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/06/ff/7841249c247aa650a76b9ee4bbaeae59370dc8bfd2f6c01f3630c35eb134/markdown_it_py-4.2.0.tar.gz", hash = "sha256:04a21681d6fbb623de53f6f364d352309d4094dd4194040a10fd51833e418d49", size = 82454, upload-time = "2026-05-07T12:08:28.36Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/81/4da04ced5a082363ecfa159c010d200ecbd959ae410c10c0264a38cac0f5/markdown_it_py-4.2.0-py3-none-any.whl", hash = "sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a", size = 91687, upload-time = "2026-05-07T12:08:27.182Z" },
+]
+
+[[package]]
+name = "markdownify"
+version = "1.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "beautifulsoup4" },
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3f/bc/c8c8eea5335341306b0fa7e1cb33c5e1c8d24ef70ddd684da65f41c49c92/markdownify-1.2.2.tar.gz", hash = "sha256:b274f1b5943180b031b699b199cbaeb1e2ac938b75851849a31fd0c3d6603d09", size = 18816, upload-time = "2025-11-16T19:21:18.565Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/43/ce/f1e3e9d959db134cedf06825fae8d5b294bd368aacdd0831a3975b7c4d55/markdownify-1.2.2-py3-none-any.whl", hash = "sha256:3f02d3cc52714084d6e589f70397b6fc9f2f3a8531481bf35e8cc39f975e186a", size = 15724, upload-time = "2025-11-16T19:21:17.622Z" },
 ]
 
 [[package]]

@@ -321,10 +321,13 @@ parser, installed into the server environment as an `arca-ingest` extra:
 | Extension | Extra | Parser |
 | - | - | - |
 | `.pdf` | `arca-ingest[pdf]` | `pypdf` |
-| `.docx` | `arca-ingest[docx]` | `python-docx` |
-| `.html`, `.htm` | `arca-ingest[html]` | `beautifulsoup4` |
-| `.epub` | `arca-ingest[epub]` | `ebooklib` + `beautifulsoup4` |
+| `.docx` | `arca-ingest[docx]` | `mammoth` + `beautifulsoup4` + `markdownify` |
+| `.html`, `.htm` | `arca-ingest[html]` | `beautifulsoup4` + `markdownify` |
+| `.epub` | `arca-ingest[epub]` | `ebooklib` + `beautifulsoup4` + `markdownify` |
 | `.fb2` | `arca-ingest[fb2]` | `defusedxml` (stdlib XML, hardened) |
+
+Structured formats (DOCX, HTML, EPUB) are rendered as **Markdown**, not flattened to
+plain text: headings, lists, tables, and link targets survive into the stored chunks.
 
 A loader registers itself as soon as its parser is importable in the environment, so
 `uv pip install pypdf` (or `arca-ingest[all]` for every format) is enough to light up that
