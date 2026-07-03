@@ -28,7 +28,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // ── Add memory ─────────────────────────────────────────
       const showAddForm = ref(false);
-      const newMemory = ref({ content: "", bucket: "" });
+      const newMemory = ref({ content: "", bucket: "", newBucket: "" });
       const saving = ref(false);
 
       // ── Ingest document ────────────────────────────────────
@@ -274,9 +274,13 @@ document.addEventListener("DOMContentLoaded", () => {
         saving.value = true;
         try {
           const body = { content: newMemory.value.content };
-          if (newMemory.value.bucket.trim()) body.bucket = newMemory.value.bucket.trim();
+          // Dropdown value is a bucket name, "" (default bucket), or "__new__" (use the typed name).
+          const bucket = newMemory.value.bucket === "__new__"
+            ? newMemory.value.newBucket.trim()
+            : newMemory.value.bucket.trim();
+          if (bucket) body.bucket = bucket;
           await api("POST", "/memories", body);
-          newMemory.value = { content: "", bucket: "" };
+          newMemory.value = { content: "", bucket: "", newBucket: "" };
           showAddForm.value = false;
           flash("Memory saved");
           await reload();

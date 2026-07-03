@@ -63,12 +63,21 @@
       <div class="row">
         <div class="field" style="flex: 1;">
           <label>Bucket</label>
-          <input type="text" v-model="newMemory.bucket" placeholder="default">
+          <select v-model="newMemory.bucket">
+            <option value="">default</option>
+            <option v-for="b in buckets" :key="b" :value="b">{{ b }}</option>
+            <option value="__new__">+ New bucket…</option>
+          </select>
+        </div>
+        <div v-if="newMemory.bucket === '__new__'" class="field" style="flex: 1;">
+          <label>New bucket name</label>
+          <input type="text" v-model="newMemory.newBucket" placeholder="bucket name">
         </div>
       </div>
       <div class="row right gap-2">
         <button class="ghost" @click="showAddForm = false">Cancel</button>
-        <button class="primary" @click="addMemory" :disabled="!newMemory.content.trim() || saving">
+        <button class="primary" @click="addMemory"
+          :disabled="!newMemory.content.trim() || saving || (newMemory.bucket === '__new__' && !newMemory.newBucket.trim())">
           {{ saving ? 'Saving...' : 'Save' }}
         </button>
       </div>
