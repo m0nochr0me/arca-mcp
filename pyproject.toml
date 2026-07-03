@@ -1,6 +1,6 @@
 [project]
 name = "arca-mcp"
-version = "0.8.3"
+version = "0.8.4"
 description = "Arca Memory Core - MCP Server for compact memories."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -57,4 +57,10 @@ line-ending = "auto"
 [dependency-groups]
 # python-docx is dev-only: the docx loader parses via mammoth, but tests build their
 # .docx fixtures with python-docx.
-dev = ["pre-commit>=4.5.1", "pytest>=8.3", "python-docx>=1.1.2", "ruff>=0.15.8"]
+dev = [
+    "pre-commit>=4.5.1",
+    "pytest>=8.3",
+    "python-docx>=1.1.2",
+    "ruff>=0.15.8",
+    "ty>=0.0.54",
+]

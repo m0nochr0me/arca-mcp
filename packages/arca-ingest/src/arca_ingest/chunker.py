@@ -8,6 +8,7 @@ for token-accurate sizing.
 """
 
 from collections.abc import Callable
+from typing import cast
 
 import semchunk
 
@@ -47,7 +48,7 @@ def chunk_text(
 
     counter = token_counter or _default_token_counter
     chunker = semchunk.chunkerify(counter, chunk_size)
-    chunks, offsets = chunker(text, offsets=True, overlap=overlap)
+    chunks, offsets = cast("tuple[list[str], list[tuple[int, int]]]", chunker(text, offsets=True, overlap=overlap))
 
     return [
         Chunk(content=content, index=i, start=start, end=end)

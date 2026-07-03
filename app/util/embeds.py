@@ -1,6 +1,6 @@
 import asyncio
 import random
-from typing import Literal, overload
+from typing import Literal, cast, overload
 
 from google.genai import errors, types
 
@@ -103,7 +103,7 @@ async def get_embedding(
             cache_key = f"embedding_{make_cache_key(mode, uncached_texts[uncached_indices.index(idx)])}"
             await cache.set(cache_key, emb.values, ttl=settings.CACHE_TTL_LONG)
 
-    return results  # type: ignore[return-value]
+    return cast("list[list[float]]", results)
 
 
 async def _get_single_embedding(
