@@ -1,0 +1,12 @@
+{% raw %}
+<!-- Error toast -->
+<div v-if="error" class="notice error toast">
+  <span>{{ error }}</span>
+  <button class="ghost" @click="error = null" style="margin-left: auto;">Dismiss</button>
+</div>
+
+<!-- Success toast -->
+<div v-if="success" class="notice success toast">
+  <span>{{ success }}</span>
+</div>
+{% endraw %}

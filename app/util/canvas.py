@@ -55,6 +55,7 @@ def build_bucket_canvas(rows: list[dict], id_bucket: dict[str, str], bucket: str
                 "connected": list(r.get("connected_nodes") or []),
                 "rels": list(r.get("relationship_types") or []),
                 "created_at": r.get("created_at"),
+                "kind": r.get("kind"),
             }
         )
 
@@ -73,7 +74,12 @@ def build_bucket_canvas(rows: list[dict], id_bucket: dict[str, str], bucket: str
                 "y": (i // cols) * (NODE_H + GAP_Y),
                 "width": NODE_W,
                 "height": NODE_H,
-                "arca": {"kind": "memory", "bucket": bucket, "created_at": m["created_at"]},
+                "arca": {
+                    "kind": "memory",
+                    "bucket": bucket,
+                    "created_at": m["created_at"],
+                    "mem_kind": m["kind"],
+                },
             }
         )
 

@@ -7,27 +7,25 @@
 {% block content %}
 {% raw %}
 <div id="memory-app" v-cloak>
-  <!-- Auth banner -->
-  <div v-if="!authKey" class="notice" style="margin-bottom: 22px;">
-    <span>Enter your API key to connect.</span>
-    <div class="row" style="margin-left: auto;">
-      <div class="field" style="flex-direction: row; align-items: center; gap: 8px;">
-        <input type="password" v-model="authKeyInput" placeholder="Bearer token" @keydown.enter="saveAuth"
-          style="width: 260px;">
-        <button class="primary" @click="saveAuth">Connect</button>
-      </div>
-    </div>
-  </div>
-
+{% endraw %}
+{% include "partials/auth_banner.html" %}
+{% raw %}
   <div v-if="authKey" class="page">
     <!-- Top bar -->
     <div class="row spread">
       <div class="row">
-        <div class="field" style="flex-direction: row; align-items: center; gap: 8px;">
+        <div class="field inline">
           <label>NS</label>
-          <select v-model="namespace" @change="reload" style="width: 160px;">
+          <select v-model="namespace" @change="onNsChange" style="width: 160px;">
             <option v-for="ns in namespaces" :key="ns" :value="ns">{{ ns }}</option>
           </select>
+          <button class="ghost xs" @click="showNsForm = !showNsForm" title="New namespace"
+            aria-label="New namespace">+</button>
+        </div>
+        <div v-if="showNsForm" class="field inline">
+          <input type="text" v-model="newNsName" placeholder="namespace" style="width: 120px;"
+            @keydown.enter="createNamespace">
+          <button class="primary xs" @click="createNamespace" :disabled="!newNsName.trim()">OK</button>
         </div>
       </div>
       <div class="row">
@@ -61,7 +59,7 @@
         <textarea v-model="newMemory.content" rows="3" placeholder="Memory content..."></textarea>
       </div>
       <div class="row">
-        <div class="field" style="flex: 1;">
+        <div class="field grow">
           <label>Bucket</label>
           <select v-model="newMemory.bucket">
             <option value="">default</option>
@@ -69,7 +67,7 @@
             <option value="__new__">+ New bucket…</option>
           </select>
         </div>
-        <div v-if="newMemory.bucket === '__new__'" class="field" style="flex: 1;">
+        <div v-if="newMemory.bucket === '__new__'" class="field grow">
           <label>New bucket name</label>
           <input type="text" v-model="newMemory.newBucket" placeholder="bucket name">
         </div>
@@ -105,7 +103,7 @@
         </template>
       </div>
       <div class="row">
-        <div class="field" style="flex: 1;">
+        <div class="field grow">
           <label>Bucket {{ ingestFiles.length > 1 ? '(required for multiple files)' : '(optional)' }}</label>
           <select v-model="ingestBucket">
             <option value="">{{ ingestFiles.length > 1 ? '— choose a bucket —' : '(from file name)' }}</option>
@@ -113,7 +111,7 @@
             <option value="__new__">+ New bucket…</option>
           </select>
         </div>
-        <div v-if="ingestBucket === '__new__'" class="field" style="flex: 1;">
+        <div v-if="ingestBucket === '__new__'" class="field grow">
           <label>New bucket name</label>
           <input type="text" v-model="ingestNewBucket" placeholder="bucket name">
         </div>
@@ -127,7 +125,7 @@
           <input type="checkbox" v-model="ingestCreateParent">
           <span>Create parent node</span>
         </label>
-        <div v-if="ingestCreateParent" class="field" style="flex: 1;">
+        <div v-if="ingestCreateParent" class="field grow">
           <input type="text" v-model="ingestParentContent"
             :placeholder="ingestFiles.length > 1 ? 'parent content (defaults to bucket name)' : 'parent content (defaults to file name)'">
         </div>
@@ -148,12 +146,12 @@
         <div class="panel stack gap-2">
           <div class="row spread">
             <p class="eyebrow">BUCKETS</p>
-            <button class="ghost" @click="showBucketForm = !showBucketForm" style="padding: 0 5px;"
-              title="Create bucket">+</button>
+            <button class="ghost xs" @click="showBucketForm = !showBucketForm" title="Create bucket"
+              aria-label="Create bucket">+</button>
           </div>
           <!-- Create bucket inline -->
           <div v-if="showBucketForm" class="row gap-1">
-            <input type="text" v-model="newBucketName" placeholder="Bucket name" style="flex: 1;"
+            <input type="text" v-model="newBucketName" placeholder="Bucket name" class="grow"
               @keydown.enter="createBucket">
             <button class="primary" @click="createBucket" :disabled="!newBucketName.trim()">Add</button>
           </div>
@@ -161,21 +159,21 @@
             <button :class="['bucket-item', { active: activeBucket === null }]" @click="selectBucket(null)">All</button>
             <div v-for="b in buckets" :key="b" class="bucket-row">
               <!-- Rename mode -->
-              <div v-if="renamingBucket === b" class="row gap-1" style="flex: 1;">
-                <input type="text" v-model="renameBucketValue" style="flex: 1;" @keydown.enter="confirmRenameBucket(b)"
+              <div v-if="renamingBucket === b" class="row gap-1 grow">
+                <input type="text" v-model="renameBucketValue" class="grow" @keydown.enter="confirmRenameBucket(b)"
                   @keydown.escape="renamingBucket = null">
-                <button class="primary" @click="confirmRenameBucket(b)" style="padding: 2px 6px;">OK</button>
-                <button class="ghost" @click="renamingBucket = null" style="padding: 2px 6px;">X</button>
+                <button class="primary xs" @click="confirmRenameBucket(b)">OK</button>
+                <button class="ghost xs" @click="renamingBucket = null">X</button>
               </div>
               <!-- Normal mode -->
               <template v-else>
-                <button :class="['bucket-item', { active: activeBucket === b }]" @click="selectBucket(b)"
-                  style="flex: 1;">{{ b }}</button>
+                <button :class="['bucket-item', 'grow', { active: activeBucket === b }]"
+                  @click="selectBucket(b)">{{ b }}</button>
                 <div class="bucket-actions">
-                  <button class="ghost" @click="startRenameBucket(b)" title="Rename"
-                    style="padding: 2px 5px;">R</button>
-                  <button class="ghost danger-text" @click="clearBucket(b)" title="Clear"
-                    style="padding: 2px 5px;">X</button>
+                  <button class="ghost xs" @click="startRenameBucket(b)" title="Rename"
+                    aria-label="Rename bucket">R</button>
+                  <button class="ghost xs danger-text" @click="clearBucket(b)" title="Clear"
+                    aria-label="Clear bucket">X</button>
                 </div>
               </template>
             </div>
@@ -190,8 +188,7 @@
             <input type="text" v-model="searchQuery" placeholder="Semantic search..." @keydown.enter="searchMemories">
           </div>
           <div class="row gap-1">
-            <button class="primary" @click="searchMemories" :disabled="!searchQuery.trim() || searching"
-              style="flex:1;">
+            <button class="primary grow" @click="searchMemories" :disabled="!searchQuery.trim() || searching">
               {{ searching ? 'Searching...' : 'Search' }}
             </button>
             <button v-if="isSearchResult" class="ghost" @click="clearSearch">Clear</button>
@@ -217,21 +214,32 @@
         <div v-else class="timeline">
           <div v-for="m in memories" :key="m.memory_id" class="timeline-entry">
             <div class="timeline-meta">
-              <span class="tag">{{ m.bucket }}</span>
+              <span class="row gap-1">
+                <span class="tag">{{ m.bucket }}</span>
+                <span v-if="m.source" class="tag secondary" :title="'Ingested from ' + m.source">
+                  {{ m.source }}<template v-if="m.chunk_index !== null"> &middot; #{{ m.chunk_index }}</template>
+                </span>
+              </span>
               <span>{{ formatDate(m.created_at) }}</span>
             </div>
 
             <!-- Content: inline edit on double-click -->
             <div v-if="editingId === m.memory_id" class="stack gap-2" style="margin: 6px 0;">
-              <textarea v-model="editContent" rows="3" class="edit-textarea" ref="editField"></textarea>
+              <textarea v-model="editContent" rows="3" class="edit-textarea"></textarea>
               <div class="row gap-1">
-                <div class="field" style="flex-direction: row; align-items: center; gap: 5px;">
+                <div class="field inline">
                   <label style="text-transform: none;">Bucket:</label>
-                  <input type="text" v-model="editBucket" style="width: 120px;">
+                  <select v-model="editBucket" style="width: 140px;">
+                    <option v-for="b in buckets" :key="b" :value="b">{{ b }}</option>
+                    <option value="__new__">+ New bucket…</option>
+                  </select>
+                  <input v-if="editBucket === '__new__'" type="text" v-model="editNewBucket"
+                    placeholder="bucket name" style="width: 120px;">
                 </div>
                 <div style="margin-left: auto;" class="row gap-1">
                   <button class="ghost" @click="cancelEdit">Cancel</button>
-                  <button class="primary" @click="saveEdit(m)" :disabled="updatingId === m.memory_id">
+                  <button class="primary" @click="saveEdit(m)"
+                    :disabled="updatingId === m.memory_id || (editBucket === '__new__' && !editNewBucket.trim())">
                     {{ updatingId === m.memory_id ? 'Saving...' : 'Save' }}
                   </button>
                 </div>
@@ -244,11 +252,13 @@
             <div class="row spread" style="margin-top: 6px;">
               <span class="muted codeish">{{ m.memory_id }}</span>
               <div class="row gap-1">
-                <button class="ghost" @click="toggleConnections(m)" style="padding: 2px 8px;"
+                <a class="btn ghost xs" :href="'/canvas?bucket=' + encodeURIComponent(m.bucket) + '&focus=' + m.memory_id"
+                  title="Show on canvas">Map</a>
+                <button class="ghost xs" @click="toggleConnections(m)"
                   :class="{ 'conn-active': expandedId === m.memory_id }">
                   {{ (m.connected_nodes && m.connected_nodes.length) || 0 }} conn
                 </button>
-                <button class="ghost danger-text" @click="deleteMemory(m)" style="padding: 2px 8px;">Del</button>
+                <button class="ghost xs danger-text" @click="deleteMemory(m)">Del</button>
               </div>
             </div>
 
@@ -263,28 +273,43 @@
                 style="margin-bottom: 11px;">
                 <div v-for="(nodeId, idx) in m.connected_nodes" :key="nodeId + idx" class="edge">
                   <span class="edge-arrow">-></span>
-                  <span class="codeish" style="flex: 1; overflow: hidden; text-overflow: ellipsis;">{{ nodeId }}</span>
+                  <span class="codeish grow" style="overflow: hidden; text-overflow: ellipsis;">{{ nodeId }}</span>
                   <span class="tag secondary">{{ m.relationship_types[idx] }}</span>
-                  <button class="ghost danger-text" @click="removeEdge(m, nodeId, m.relationship_types[idx])"
-                    style="padding: 0 4px;" title="Disconnect">x</button>
+                  <button class="ghost xs danger-text" @click="removeEdge(m, nodeId, m.relationship_types[idx])"
+                    title="Disconnect" aria-label="Disconnect">x</button>
                 </div>
               </div>
               <p v-else class="muted" style="margin-bottom: 11px;">No outgoing connections.</p>
 
               <!-- Add connection form -->
               <div class="row gap-1">
-                <div class="field" style="flex-direction: row; align-items: center; gap: 5px;">
-                  <label style="text-transform: none;">UUID:</label>
-                  <input type="text" v-model="newEdge.targetId" style="flex: 2;">
+                <div class="field inline grow">
+                  <label style="text-transform: none;">Target:</label>
+                  <input type="text" v-model="newEdge.query" class="grow"
+                    placeholder="Search memories or paste a UUID..." @keydown.enter="searchEdgeTargets(m)">
+                  <button class="ghost" @click="searchEdgeTargets(m)"
+                    :disabled="!newEdge.query.trim() || edgeSearching">{{ edgeSearching ? '...' : 'Find' }}</button>
                 </div>
-                <div class="field" style="flex-direction: row; align-items: center; gap: 5px;">
+                <div class="field inline">
                   <label style="text-transform: none;">Rel.:</label>
-                  <input type="text" v-model="newEdge.relType" style="flex: 1;">
+                  <input type="text" v-model="newEdge.relType" style="width: 120px;">
                 </div>
-                <button class="primary" @click="addEdge(m)"
-                  :disabled="!newEdge.targetId.trim() || !newEdge.relType.trim()"
-                  style="padding: 5px 8px;">Link</button>
+                <button class="primary xs" @click="addEdge(m)"
+                  :disabled="!newEdge.targetId || !newEdge.relType.trim()">Link</button>
               </div>
+
+              <!-- Target candidates (semantic search) -->
+              <div v-if="edgeResults.length" class="stack gap-1" style="margin-top: 8px;">
+                <button v-for="r in edgeResults" :key="r.memory_id"
+                  :class="['edge-candidate', { selected: newEdge.targetId === r.memory_id }]"
+                  @click="pickEdgeTarget(r)">
+                  <span class="tag">{{ r.bucket }}</span>
+                  <span class="edge-candidate-text">{{ r.content }}</span>
+                </button>
+              </div>
+              <p v-if="newEdge.targetId" class="muted codeish" style="margin-top: 5px;">
+                Target: {{ newEdge.targetId }}
+              </p>
             </div>
           </div>
         </div>
@@ -295,9 +320,9 @@
             <button class="ghost" @click="prevPage" :disabled="!hasPrevPage || loading">Prev</button>
             <button class="ghost" @click="nextPage" :disabled="!hasNextPage || loading">Next</button>
           </div>
-          <div class="row gap-2" style="align-items: center;">
+          <div class="row gap-2">
             <span class="muted codeish">{{ pageStart }}-{{ pageEnd }} of {{ total }}</span>
-            <div class="field" style="flex-direction: row; align-items: center; gap: 6px;">
+            <div class="field inline" style="gap: 6px;">
               <label style="text-transform: none;">Per page:</label>
               <select v-model.number="pageSize" @change="changePageSize" style="width: 64px;">
                 <option :value="25">25</option>
@@ -309,18 +334,10 @@
         </div>
       </div>
     </div>
-
-    <!-- Error toast -->
-    <div v-if="error" class="notice error toast">
-      <span>{{ error }}</span>
-      <button class="ghost" @click="error = null" style="margin-left: auto;">Dismiss</button>
-    </div>
-
-    <!-- Success toast -->
-    <div v-if="success" class="notice success toast">
-      <span>{{ success }}</span>
-    </div>
   </div>
+{% endraw %}
+{% include "partials/toasts.html" %}
+{% raw %}
 </div>
 {% endraw %}
 {% endblock %}

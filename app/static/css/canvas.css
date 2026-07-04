@@ -132,6 +132,34 @@
   fill: var(--text);
 }
 
+/* Aggregate tier (lod2): whole scene as four paths */
+
+.cedge-agg {
+  fill: none;
+  stroke: var(--tertiary);
+  stroke-width: 1;
+  opacity: 0.35;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.cedge-agg.external {
+  stroke: var(--secondary);
+}
+
+.cnode-agg {
+  fill: rgba(22, 31, 38, 0.97);
+  stroke: var(--primary);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.cnode-agg.external {
+  fill: rgba(255, 193, 122, 0.12);
+  stroke: var(--secondary);
+}
+
 /* ── Nodes ─────────────────────────────────────────────────── */
 
 .cnode {
@@ -169,6 +197,17 @@
 .cnode.linktgt {
   border-color: var(--tertiary);
   box-shadow: 0 0 0 1px var(--tertiary);
+}
+
+/* Node-search hit */
+.cnode.found {
+  border-color: var(--tertiary);
+  box-shadow: 0 0 0 2px var(--tertiary);
+}
+
+/* Document anchor (ingested parent node) */
+.cnode.doc {
+  border-left-color: var(--tertiary);
 }
 
 .cnode-head {

@@ -47,7 +47,7 @@
     }
   });
 
-  window.PillbugDashboardConfirm = {
+  window.ArcaConfirm = {
     open(options) {
       if (resolvePending) {
         finish(false);

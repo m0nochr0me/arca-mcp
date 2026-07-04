@@ -17,6 +17,8 @@ class CanvasNodeMeta(BaseModel):
     kind: str  # "memory" | "external"
     bucket: str | None = None
     created_at: datetime | None = None
+    # Ingestion role of the underlying memory row ("chunk" / "document"), if any:
+    mem_kind: str | None = None
     # Only set on external (cross-bucket) stub nodes:
     target_id: str | None = None
     target_bucket: str | None = None

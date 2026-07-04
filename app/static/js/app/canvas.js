@@ -13,18 +13,22 @@ document.addEventListener("DOMContentLoaded", () => {
   const MIN_SCALE = 0.04; // zoom-out floor (guards against off-screen sprawl)
   const RENDER_MARGIN = 600; // screen-px halo around the viewport kept in the DOM
   const LOD_THRESHOLD = 0.05; // below this zoom, nodes render as bare blocks
+  const LOD_MAX_NODES = 250; // above this many ON-SCREEN nodes, bare blocks too (fit-to-all)
+  const LOD2_NODES = 800; // above this many visible nodes, collapse to aggregate paths
+  const LOD2_EDGES = 1200; // ... or this many visible edges (edges dominate huge buckets)
+  const NODE_TEXT_CLIP = 300; // display-only clip; the 260x120 box shows ~200 chars
 
   createApp({
     setup() {
-      // ── Auth & connection ──────────────────────────────────
-      const authKey = ref(localStorage.getItem("arca_auth_key") || "");
-      const authKeyInput = ref("");
-      const namespace = ref(localStorage.getItem("arca_namespace") || "default");
-      const namespaces = ref([localStorage.getItem("arca_namespace") || "default"]);
-      const connected = ref(false);
+      // Shared auth / namespace / bucket / toast state and API helper.
+      const shared = ArcaShared.create(Vue);
+      const {
+        authKey, authKeyInput, namespace, namespaces, connected, buckets,
+        error, success, flash, showError, api, loadNamespaces, loadBuckets,
+        saveAuth, disconnectAuth, showNsForm, newNsName, createNamespace, canvasPosKey,
+      } = shared;
 
       // ── Data ───────────────────────────────────────────────
-      const buckets = ref([]);
       const activeBucket = ref(null);
       const nodes = ref([]);
       const edges = ref([]);
@@ -58,20 +62,6 @@ document.addEventListener("DOMContentLoaded", () => {
       // ── UI state ───────────────────────────────────────────
       const maximized = ref(false);
       const loading = ref(false);
-      const error = ref(null);
-      const success = ref(null);
-      let successTimer = null;
-
-      function flash(msg) {
-        success.value = msg;
-        clearTimeout(successTimer);
-        successTimer = setTimeout(() => { success.value = null; }, 2500);
-      }
-
-      function showError(msg) {
-        error.value = msg;
-        setTimeout(() => { if (error.value === msg) error.value = null; }, 5000);
-      }
 
       // ── Derived ────────────────────────────────────────────
       const nodeMap = computed(() => {
@@ -133,10 +123,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // ── Viewport culling + level-of-detail ─────────────────
       // Only nodes/edges whose world rect intersects the viewport (plus a
       // screen-px halo) are kept in the DOM, so DOM size tracks what's on
-      // screen rather than the bucket size. Below LOD_THRESHOLD nodes render
-      // as bare blocks (no inner content) since their text is unreadable.
-      const lod = computed(() => view.scale < LOD_THRESHOLD);
-
+      // screen rather than the bucket size.
       const viewBounds = computed(() => {
         const s = cullView.scale || 1;
         const m = RENDER_MARGIN;
@@ -170,6 +157,107 @@ document.addEventListener("DOMContentLoaded", () => {
         for (const n of visibleNodes.value) s.add(n.id);
         return s;
       });
+
+      // Nodes intersecting the actual viewport — no render-margin halo. The
+      // level-of-detail decision counts these, not the margined set: otherwise
+      // off-screen halo nodes force bare blocks at zooms where the few nodes
+      // really on screen are perfectly readable.
+      const onScreenIds = computed(() => {
+        const s = cullView.scale || 1;
+        const minX = -cullView.x / s;
+        const minY = -cullView.y / s;
+        const maxX = (wrapW.value - cullView.x) / s;
+        const maxY = (wrapH.value - cullView.y) / s;
+        const ids = new Set();
+        for (const n of visibleNodes.value) {
+          if (n.x + n.width >= minX && n.x <= maxX && n.y + n.height >= minY && n.y <= maxY) ids.add(n.id);
+        }
+        return ids;
+      });
+
+      // Bare blocks (no inner content) when the text would be unreadable (zoomed
+      // out) OR when too many nodes are actually on screen for full-detail DOM
+      // to hold 60fps. Past LOD_MAX_NODES on-screen each node is too small to
+      // read anyway, so text appears exactly when it becomes legible.
+      const lod = computed(() => view.scale < LOD_THRESHOLD || onScreenIds.value.size > LOD_MAX_NODES);
+
+      // Halo (off-screen) nodes always render bare, so the full-detail DOM is
+      // capped at what is actually on screen; text pops in at the screen edge
+      // as nodes pan into view.
+      function nodeLod(n) {
+        return lod.value || !onScreenIds.value.has(n.id);
+      }
+
+      // Second LOD tier: past ~800 nodes / ~1200 edges even bare per-element DOM
+      // lags (thousands of vnodes re-diffed per cull tick), so the whole scene
+      // collapses into four aggregate <path> elements. Built from the FULL data
+      // set — independent of the viewport — so panning/zooming rebuilds nothing.
+      const lod2 = computed(
+        () => visibleNodes.value.length > LOD2_NODES || visibleEdges.value.length > LOD2_EDGES
+      );
+
+      const lodNodeRects = computed(() => {
+        let mem = "", ext = "";
+        for (const n of nodes.value) {
+          const seg = `M${n.x},${n.y}h${n.width}v${n.height}h${-n.width}Z`;
+          if (n.kind === "external") ext += seg;
+          else mem += seg;
+        }
+        return { mem, ext };
+      });
+
+      const lodEdgePaths = computed(() => {
+        let internal = "", external = "";
+        for (const e of edgeGeo.value) {
+          if (e.external) external += e.d;
+          else internal += e.d;
+        }
+        return { internal, external };
+      });
+
+      // Display-only clip: full text stays in state (the edit modal reads n.text),
+      // but laying out multi-KB strings inside an overflow:hidden box is pure cost.
+      function clipText(t) {
+        return t.length > NODE_TEXT_CLIP ? t.slice(0, NODE_TEXT_CLIP) + "…" : t;
+      }
+
+      // ── Node search ────────────────────────────────────────
+      const nodeQuery = ref("");
+      const nodeMatches = ref([]);
+      const nodeMatchPos = ref(-1);
+      const foundId = ref(null);
+      let lastNodeQuery = "";
+
+      function resetNodeSearch() {
+        nodeMatches.value = [];
+        nodeMatchPos.value = -1;
+        foundId.value = null;
+        lastNodeQuery = "";
+      }
+
+      // Enter finds the first match and centers on it; Enter again cycles.
+      function findNode() {
+        const q = nodeQuery.value.trim().toLowerCase();
+        if (!q) { resetNodeSearch(); return; }
+        if (q !== lastNodeQuery) {
+          lastNodeQuery = q;
+          nodeMatches.value = nodes.value
+            .filter(n => n.kind === "memory" && (n.text.toLowerCase().includes(q) || n.id.startsWith(q)))
+            .map(n => n.id);
+          nodeMatchPos.value = -1;
+        }
+        if (!nodeMatches.value.length) {
+          foundId.value = null;
+          showError("No nodes match");
+          return;
+        }
+        nodeMatchPos.value = (nodeMatchPos.value + 1) % nodeMatches.value.length;
+        const n = nodeMap.value[nodeMatches.value[nodeMatchPos.value]];
+        if (!n) return;
+        foundId.value = n.id;
+        if (view.scale < 0.4) view.scale = 0.9; // zoom to readable before centering
+        centerOn(n);
+      }
 
       const visibleEdges = computed(() => {
         const ids = visibleIds.value;
@@ -271,7 +359,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // ── Position persistence (localStorage, per namespace+bucket) ──
       function posKey() {
-        return `arca_canvas_pos:${namespace.value || "default"}:${activeBucket.value}`;
+        return canvasPosKey(activeBucket.value);
       }
 
       function loadPositions() {
@@ -309,53 +397,12 @@ document.addEventListener("DOMContentLoaded", () => {
         });
       }
 
-      // ── API helper ─────────────────────────────────────────
-      function headers() {
-        return {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${authKey.value}`,
-          "X-Namespace": namespace.value || "default",
-        };
-      }
-
-      async function api(method, path, body) {
-        const opts = { method, headers: headers() };
-        if (body !== undefined) opts.body = JSON.stringify(body);
-        const res = await fetch(`/v1${path}`, opts);
-        if (!res.ok) {
-          const detail = await res.text();
-          throw new Error(`${res.status}: ${detail}`);
-        }
-        return res.json();
-      }
-
       // ── Loading ────────────────────────────────────────────
-      async function loadNamespaces() {
-        try {
-          const data = await api("GET", "/namespaces");
-          const list = data.namespaces || [];
-          if (!list.includes(namespace.value)) list.push(namespace.value);
-          namespaces.value = list.sort();
-        } catch {
-          // ignore — table may be empty
-        }
-      }
-
-      async function loadBuckets() {
-        try {
-          const data = await api("GET", "/buckets");
-          buckets.value = data.buckets || [];
-          connected.value = true;
-        } catch (e) {
-          connected.value = false;
-          if (authKey.value) showError("Failed to load buckets: " + e.message);
-        }
-      }
-
       async function loadCanvas(focusId) {
         if (!activeBucket.value) return;
         loading.value = true;
         cancelLink();
+        resetNodeSearch();
         selectedEdge.value = null;
         editor.value = null;
         try {
@@ -364,6 +411,7 @@ document.addEventListener("DOMContentLoaded", () => {
             id: n.id, x: n.x, y: n.y, width: n.width, height: n.height,
             text: n.text, color: n.color || null,
             kind: n.arca.kind, bucket: n.arca.bucket || null,
+            mem_kind: n.arca.mem_kind || null,
             created_at: n.arca.created_at || null,
             target_id: n.arca.target_id || null, target_bucket: n.arca.target_bucket || null,
           }));
@@ -390,7 +438,11 @@ document.addEventListener("DOMContentLoaded", () => {
           await nextTick();
           if (focusId) {
             const fn = nodes.value.find(x => x.id === focusId);
-            if (fn) centerOn(fn);
+            if (fn) {
+              foundId.value = fn.id;
+              if (view.scale < 0.4) view.scale = 0.9;
+              centerOn(fn);
+            }
           }
         } catch (e) {
           showError("Failed to load canvas: " + e.message);
@@ -602,12 +654,22 @@ document.addEventListener("DOMContentLoaded", () => {
         };
       }
 
-      function onBgPointerDown(ev) {
-        selectedEdge.value = null;
+      function startPan(ev) {
         panning.value = { sx: ev.clientX, sy: ev.clientY, ox: view.x, oy: view.y };
       }
 
+      function onBgPointerDown(ev) {
+        selectedEdge.value = null;
+        startPan(ev);
+      }
+
+      function onEdgePointerDown(ev, e) {
+        if (ev.button === 1) { startPan(ev); return; } // middle button pans from anywhere
+        selectEdge(e);
+      }
+
       function onNodePointerDown(ev, n) {
+        if (ev.button === 1) { startPan(ev); return; } // middle button pans from anywhere
         if (linkSource.value) {
           if (n.kind === "external") { showError("Pick a memory node as the target"); return; }
           if (n.id === linkSource.value) { showError("Cannot link a node to itself"); cancelLink(); return; }
@@ -701,6 +763,9 @@ document.addEventListener("DOMContentLoaded", () => {
       function onPointerUp() {
         if (drag.value) {
           justDragged.value = movedDuringDrag.value;
+          // The click that follows this pointerup consumes the flag; if no click
+          // arrives (release landed off-node), don't let it eat a later one.
+          if (justDragged.value) setTimeout(() => { justDragged.value = false; }, 0);
           // Commit the imperative position back to reactive state once, so edges
           // reconcile and the move persists. This is the only recompute a drag
           // triggers (one, on release — not one per frame).
@@ -754,7 +819,20 @@ document.addEventListener("DOMContentLoaded", () => {
         focusEditor();
       }
 
-      function closeEditor() {
+      // Guard against silently losing typed text on Escape / overlay click.
+      async function closeEditor() {
+        const ed = editor.value;
+        if (!ed) return;
+        const orig = ed.mode === "edit" ? (nodeMap.value[ed.id] || {}).text : "";
+        if (ed.text.trim() && ed.text !== orig) {
+          const ok = await window.ArcaConfirm.open({
+            title: "Discard changes",
+            message: "The editor has unsaved changes. Discard them?",
+            confirmLabel: "Discard",
+            tone: "danger",
+          });
+          if (!ok) return;
+        }
         editor.value = null;
       }
 
@@ -775,14 +853,14 @@ document.addEventListener("DOMContentLoaded", () => {
               target_id: null, target_bucket: null,
             });
             persistPositions();
-            closeEditor();
+            editor.value = null;
             flash("Memory added");
           } else {
             const n = nodeMap.value[ed.id];
-            if (!n || content === n.text) { closeEditor(); return; }
+            if (!n || content === n.text) { editor.value = null; return; }
             await api("PATCH", `/memories/${ed.id}`, { content });
             n.text = content;
-            closeEditor();
+            editor.value = null;
             flash("Memory updated");
           }
         } catch (e) {
@@ -792,7 +870,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       async function deleteNode(n) {
-        const ok = await window.PillbugDashboardConfirm.open({
+        const ok = await window.ArcaConfirm.open({
           title: "Delete memory",
           message: `Delete "${n.text.slice(0, 80)}${n.text.length > 80 ? "..." : ""}"? Connections will be cleaned up.`,
           confirmLabel: "Delete",
@@ -801,6 +879,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!ok) return;
         try {
           await api("DELETE", `/memories/${n.id}`);
+          if (linkSource.value === n.id || linkTarget.value === n.id) cancelLink();
           nodes.value = nodes.value.filter(x => x.id !== n.id);
           edges.value = edges.value.filter(e => e.fromNode !== n.id && e.toNode !== n.id);
           pruneStubs();
@@ -878,35 +957,26 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
 
-      // ── Auth ───────────────────────────────────────────────
-      function saveAuth() {
-        if (!authKeyInput.value.trim()) return;
-        authKey.value = authKeyInput.value.trim();
-        authKeyInput.value = "";
-        localStorage.setItem("arca_auth_key", authKey.value);
-        reload();
-      }
-
-      function disconnectAuth() {
-        authKey.value = "";
-        localStorage.removeItem("arca_auth_key");
-        connected.value = false;
-        buckets.value = [];
-        nodes.value = [];
-        edges.value = [];
-        namespaces.value = ["default"];
-      }
-
       // ── Lifecycle ──────────────────────────────────────────
+      // Deep link: /canvas?bucket=<name>&focus=<memory-id> (e.g. the timeline's
+      // "Map" action). Consumed by the first reload after buckets are known.
+      const urlParams = new URLSearchParams(location.search);
+      let pendingBucket = urlParams.get("bucket");
+      let pendingFocus = urlParams.get("focus");
+
       async function reload() {
         localStorage.setItem("arca_namespace", namespace.value || "default");
-        await loadNamespaces();
-        await loadBuckets();
+        await Promise.all([loadNamespaces(), loadBuckets()]);
         if (buckets.value.length) {
-          if (!activeBucket.value || !buckets.value.includes(activeBucket.value)) {
+          if (pendingBucket && buckets.value.includes(pendingBucket)) {
+            activeBucket.value = pendingBucket;
+          } else if (!activeBucket.value || !buckets.value.includes(activeBucket.value)) {
             activeBucket.value = buckets.value.includes("default") ? "default" : buckets.value[0];
           }
-          await loadCanvas();
+          const focus = pendingFocus;
+          pendingBucket = null;
+          pendingFocus = null;
+          await loadCanvas(focus);
         } else {
           activeBucket.value = null;
           nodes.value = [];
@@ -914,12 +984,29 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
 
+      shared.onReload = reload;
+      shared.onNamespaceChange = reload;
+      shared.onDisconnect = () => {
+        activeBucket.value = null;
+        nodes.value = [];
+        edges.value = [];
+      };
+
       onMounted(() => {
         window.addEventListener("keydown", (ev) => {
           if (ev.key !== "Escape") return;
-          if (editor.value) closeEditor();
-          else if (linkSource.value) cancelLink();
-          else if (selectedEdge.value) selectedEdge.value = null;
+          const dlg = document.getElementById("confirm-dialog");
+          if (dlg && dlg.open) return; // the confirm dialog handles its own Escape
+          if (editor.value) {
+            // Consume the key: its browser close-request would otherwise instantly
+            // cancel the confirm dialog that closeEditor may open synchronously.
+            ev.preventDefault();
+            closeEditor();
+          } else if (linkSource.value) {
+            cancelLink();
+          } else if (selectedEdge.value) {
+            selectedEdge.value = null;
+          }
         });
         window.addEventListener("resize", measureWrap);
         nextTick(() => {
@@ -936,11 +1023,14 @@ document.addEventListener("DOMContentLoaded", () => {
         buckets, activeBucket, nodes, edges,
         memoryCount, externalCount,
         // View
-        wrap, view, gTransform, layerStyle, nodeStyle, visibleNodes, visibleEdges, lod,
+        wrap, view, gTransform, layerStyle, nodeStyle, visibleNodes, visibleEdges, lod, nodeLod, clipText,
+        lod2, lodNodeRects, lodEdgePaths,
+        nodeQuery, nodeMatches, nodeMatchPos, foundId, findNode,
+        showNsForm, newNsName, createNamespace,
         xTicks, yTicks, maximized, maxLabel, toggleMaximize,
         panning, linkSource, linkTarget, relType, selectedEdge, selectedEdgeInfo,
         // Pointer
-        onBgPointerDown, onNodePointerDown, onNodeClick, onPointerMove, onPointerUp, onWheel,
+        onBgPointerDown, onEdgePointerDown, onNodePointerDown, onNodeClick, onPointerMove, onPointerUp, onWheel,
         relayout, fitView,
         // Add / edit / delete
         editor, editorField, openAdd, openEdit, closeEditor, saveEditor, deleteNode,

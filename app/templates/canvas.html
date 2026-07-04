@@ -7,33 +7,36 @@
 {% block content %}
 {% raw %}
 <div id="canvas-app" v-cloak>
-  <!-- Auth banner -->
-  <div v-if="!authKey" class="notice" style="margin-bottom: 22px;">
-    <span>Enter your API key to connect.</span>
-    <div class="row" style="margin-left: auto;">
-      <div class="field" style="flex-direction: row; align-items: center; gap: 8px;">
-        <input type="password" v-model="authKeyInput" placeholder="Bearer token" @keydown.enter="saveAuth"
-          style="width: 260px;">
-        <button class="primary" @click="saveAuth">Connect</button>
-      </div>
-    </div>
-  </div>
-
+{% endraw %}
+{% include "partials/auth_banner.html" %}
+{% raw %}
   <div v-if="authKey" class="stack gap-2" :class="{ 'canvas-max': maximized }">
     <!-- Top bar -->
     <div class="row spread">
       <div class="row">
-        <div class="field" style="flex-direction: row; align-items: center; gap: 8px;">
+        <div class="field inline">
           <label>NS</label>
-          <select v-model="namespace" @change="reload" style="width: 150px;">
+          <select v-model="namespace" @change="reload" style="width: 160px;">
             <option v-for="ns in namespaces" :key="ns" :value="ns">{{ ns }}</option>
           </select>
+          <button class="ghost xs" @click="showNsForm = !showNsForm" title="New namespace"
+            aria-label="New namespace">+</button>
         </div>
-        <div class="field" style="flex-direction: row; align-items: center; gap: 8px;">
+        <div v-if="showNsForm" class="field inline">
+          <input type="text" v-model="newNsName" placeholder="namespace" style="width: 120px;"
+            @keydown.enter="createNamespace">
+          <button class="primary xs" @click="createNamespace" :disabled="!newNsName.trim()">OK</button>
+        </div>
+        <div class="field inline">
           <label>Bucket</label>
           <select v-model="activeBucket" @change="loadCanvas()" style="width: 170px;">
             <option v-for="b in buckets" :key="b" :value="b">{{ b }}</option>
           </select>
+        </div>
+        <div class="field inline">
+          <input type="text" v-model="nodeQuery" placeholder="Find node..." style="width: 150px;"
+            @keydown.enter="findNode" :disabled="!nodes.length">
+          <span v-if="nodeMatches.length" class="muted codeish">{{ nodeMatchPos + 1 }}/{{ nodeMatches.length }}</span>
         </div>
       </div>
       <div class="row gap-1">
@@ -49,7 +52,7 @@
     <!-- Canvas surface -->
     <div class="canvas-wrap" ref="wrap" :class="{ grabbing: !!panning, linking: !!linkSource }"
       @pointerdown="onBgPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp"
-      @pointerleave="onPointerUp" @wheel.prevent="onWheel">
+      @pointerleave="onPointerUp" @wheel.prevent="onWheel" @mousedown.middle.prevent>
 
       <!-- Edge layer -->
       <svg class="edge-layer">
@@ -64,29 +67,38 @@
           </marker>
         </defs>
         <g :transform="gTransform">
-          <g v-for="e in visibleEdges" :key="e.id" class="cedge" :data-eid="e.id"
-            v-memo="[e.d, e.mx, e.my, e.label, e.external, selectedEdge === e.id, lod]"
-            :class="{ external: e.external, selected: selectedEdge === e.id }"
-            @pointerdown.stop="selectEdge(e)">
-            <path class="cedge-hit" :d="e.d" />
-            <path class="cedge-line" :d="e.d" :marker-end="e.external ? 'url(#arrow-ext)' : 'url(#arrow)'" />
-            <text v-if="e.label && !lod" class="cedge-label" :x="e.mx" :y="e.my">{{ e.label }}</text>
-          </g>
+          <!-- Aggregate tier: the whole scene as four paths (huge buckets) -->
+          <template v-if="lod2">
+            <path class="cedge-agg" :d="lodEdgePaths.internal" />
+            <path class="cedge-agg external" :d="lodEdgePaths.external" />
+            <path class="cnode-agg" :d="lodNodeRects.mem" />
+            <path class="cnode-agg external" :d="lodNodeRects.ext" />
+          </template>
+          <template v-else>
+            <g v-for="e in visibleEdges" :key="e.id" class="cedge" :data-eid="e.id"
+              v-memo="[e.d, e.mx, e.my, e.label, e.external, selectedEdge === e.id, lod]"
+              :class="{ external: e.external, selected: selectedEdge === e.id }"
+              @pointerdown.stop="onEdgePointerDown($event, e)">
+              <path class="cedge-hit" :d="e.d" />
+              <path class="cedge-line" :d="e.d" :marker-end="e.external ? 'url(#arrow-ext)' : 'url(#arrow)'" />
+              <text v-if="e.label && !lod" class="cedge-label" :x="e.mx" :y="e.my">{{ e.label }}</text>
+            </g>
+          </template>
         </g>
       </svg>
 
       <!-- Node layer -->
-      <div class="node-layer" :style="layerStyle">
+      <div v-if="!lod2" class="node-layer" :style="layerStyle">
         <div v-for="n in visibleNodes" :key="n.id" class="cnode"
-          v-memo="[n.x, n.y, n.width, n.height, n.text, n.kind, n.target_bucket, lod, linkSource === n.id, linkTarget === n.id]"
-          :class="{ external: n.kind === 'external', linksrc: linkSource === n.id, linktgt: linkTarget === n.id, lod: lod }"
+          v-memo="[n.x, n.y, n.width, n.height, n.text, n.kind, n.target_bucket, nodeLod(n), linkSource === n.id, linkTarget === n.id, foundId === n.id]"
+          :class="{ external: n.kind === 'external', linksrc: linkSource === n.id, linktgt: linkTarget === n.id, lod: nodeLod(n), found: foundId === n.id, doc: n.mem_kind === 'document' }"
           :style="nodeStyle(n)"
           @pointerdown.stop="onNodePointerDown($event, n)"
           @click.stop="onNodeClick(n)"
           @dblclick.stop="openEdit(n)">
 
           <!-- Full detail (omitted when zoomed out: text would be unreadable) -->
-          <template v-if="!lod">
+          <template v-if="!nodeLod(n)">
             <!-- External stub -->
             <template v-if="n.kind === 'external'">
               <div class="cnode-ext-label">{{ n.text }}</div>
@@ -98,11 +110,13 @@
               <div class="cnode-head">
                 <span class="cnode-id codeish">{{ n.id.slice(0, 8) }}</span>
                 <span class="cnode-acts">
-                  <button class="cnode-act" title="Connect from here" @pointerdown.stop @click.stop="startLink(n)">+</button>
-                  <button class="cnode-act danger-text" title="Delete" @pointerdown.stop @click.stop="deleteNode(n)">x</button>
+                  <button class="cnode-act" title="Connect from here" aria-label="Connect from here"
+                    @pointerdown.stop @click.stop="startLink(n)">+</button>
+                  <button class="cnode-act danger-text" title="Delete" aria-label="Delete memory"
+                    @pointerdown.stop @click.stop="deleteNode(n)">x</button>
                 </span>
               </div>
-              <div class="cnode-body">{{ n.text }}</div>
+              <div class="cnode-body">{{ clipText(n.text) }}</div>
             </template>
           </template>
         </div>
@@ -140,14 +154,14 @@
       <div v-if="loading" class="canvas-hint">Loading canvas...</div>
 
       <!-- Link mode banner -->
-      <div v-if="linkSource && !linkTarget" class="canvas-bar">
+      <div v-if="linkSource && !linkTarget" class="canvas-bar" @pointerdown.stop>
         <span>Click a target node to connect from <b class="codeish">{{ linkSource.slice(0, 8) }}</b> &middot; Esc to
           cancel</span>
         <button class="ghost" @click="cancelLink">Cancel</button>
       </div>
 
       <!-- Relationship input -->
-      <div v-if="linkSource && linkTarget" class="canvas-bar">
+      <div v-if="linkSource && linkTarget" class="canvas-bar" @pointerdown.stop>
         <span class="codeish">{{ linkSource.slice(0, 8) }} &rarr; {{ linkTarget.slice(0, 8) }}</span>
         <input type="text" v-model="relType" placeholder="relationship" @keydown.enter="confirmLink"
           style="width: 160px;">
@@ -156,7 +170,7 @@
       </div>
 
       <!-- Selected edge panel -->
-      <div v-if="selectedEdge && selectedEdgeInfo" class="canvas-bar">
+      <div v-if="selectedEdge && selectedEdgeInfo" class="canvas-bar" @pointerdown.stop>
         <span class="codeish">{{ selectedEdgeInfo.from.slice(0, 8) }}</span>
         <span class="tag secondary">{{ selectedEdgeInfo.label }}</span>
         <span class="codeish">&rarr; {{ selectedEdgeInfo.toShort }}</span>
@@ -191,16 +205,9 @@
     </div>
   </div>
 
-  <!-- Error toast -->
-  <div v-if="error" class="notice error toast">
-    <span>{{ error }}</span>
-    <button class="ghost" @click="error = null" style="margin-left: auto;">Dismiss</button>
-  </div>
-
-  <!-- Success toast -->
-  <div v-if="success" class="notice success toast">
-    <span>{{ success }}</span>
-  </div>
+{% endraw %}
+{% include "partials/toasts.html" %}
+{% raw %}
 </div>
 {% endraw %}
 {% endblock %}

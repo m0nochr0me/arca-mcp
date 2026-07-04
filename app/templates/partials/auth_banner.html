@@ -1,0 +1,13 @@
+{% raw %}
+<!-- Auth banner -->
+<div v-if="!authKey" class="notice" style="margin-bottom: 22px;">
+  <span>Enter your API key to connect.</span>
+  <div class="row" style="margin-left: auto;">
+    <div class="field inline">
+      <input type="password" v-model="authKeyInput" placeholder="Bearer token" @keydown.enter="saveAuth"
+        style="width: 260px;">
+      <button class="primary" @click="saveAuth">Connect</button>
+    </div>
+  </div>
+</div>
+{% endraw %}

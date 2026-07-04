@@ -98,6 +98,30 @@
   border-top: 1px solid var(--border-dim);
 }
 
+.edge-candidate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 5px 8px;
+  background: rgba(10, 15, 19, 0.6);
+  border: 1px solid var(--border-dim);
+}
+
+.edge-candidate.selected {
+  border-color: rgba(105, 240, 209, 0.5);
+  background: rgba(105, 240, 209, 0.08);
+}
+
+.edge-candidate-text {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+}
+
 .conn-active {
   color: var(--tertiary) !important;
 }
@@ -130,15 +154,4 @@
 .dropzone.dragging {
   border-color: var(--primary);
   background: rgba(105, 240, 209, 0.08);
-}
-
-/* ── Toast notifications ───────────────────────────────────── */
-
-.toast {
-  position: fixed;
-  bottom: 22px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 300;
-  max-width: 500px;
 }

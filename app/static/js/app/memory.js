@@ -3,15 +3,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   createApp({
     setup() {
-      // ── Auth & connection ──────────────────────────────────
-      const authKey = ref(localStorage.getItem("arca_auth_key") || "");
-      const authKeyInput = ref("");
-      const namespace = ref(localStorage.getItem("arca_namespace") || "default");
-      const namespaces = ref([localStorage.getItem("arca_namespace") || "default"]);
-      const connected = ref(false);
+      // Shared auth / namespace / bucket / toast state and API helper.
+      const shared = ArcaShared.create(Vue);
+      const {
+        authKey, authKeyInput, namespace, namespaces, connected, buckets,
+        error, success, flash, showError, api, loadNamespaces, loadBuckets,
+        saveAuth, disconnectAuth, showNsForm, newNsName, createNamespace, canvasPosKey,
+      } = shared;
 
       // ── Data ───────────────────────────────────────────────
-      const buckets = ref([]);
       const activeBucket = ref(null);
       const memories = ref([]);
       const isSearchResult = ref(false);
@@ -66,11 +66,14 @@ document.addEventListener("DOMContentLoaded", () => {
       const editingId = ref(null);
       const editContent = ref("");
       const editBucket = ref("");
+      const editNewBucket = ref("");
       const updatingId = ref(null);
 
       // ── Connections ────────────────────────────────────────
       const expandedId = ref(null);
-      const newEdge = ref({ targetId: "", relType: "" });
+      const newEdge = ref({ query: "", targetId: "", relType: "" });
+      const edgeResults = ref([]);
+      const edgeSearching = ref(false);
 
       // ── Bucket management ──────────────────────────────────
       const showBucketForm = ref(false);
@@ -81,84 +84,40 @@ document.addEventListener("DOMContentLoaded", () => {
       // ── UI state ───────────────────────────────────────────
       const loading = ref(false);
       const searching = ref(false);
-      const error = ref(null);
-      const success = ref(null);
-
-      let successTimer = null;
-
-      function flash(msg) {
-        success.value = msg;
-        clearTimeout(successTimer);
-        successTimer = setTimeout(() => { success.value = null; }, 2500);
-      }
-
-      function showError(msg) {
-        error.value = msg;
-        setTimeout(() => { if (error.value === msg) error.value = null; }, 5000);
-      }
-
-      // ── API helper ─────────────────────────────────────────
-
-      function headers() {
-        return {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${authKey.value}`,
-          "X-Namespace": namespace.value || "default",
-        };
-      }
-
-      async function api(method, path, body) {
-        const opts = { method, headers: headers() };
-        if (body !== undefined) opts.body = JSON.stringify(body);
-        const res = await fetch(`/v1${path}`, opts);
-        if (!res.ok) {
-          const detail = await res.text();
-          throw new Error(`${res.status}: ${detail}`);
-        }
-        return res.json();
-      }
-
-      // ── Namespaces ─────────────────────────────────────────
-
-      async function loadNamespaces() {
-        try {
-          const data = await api("GET", "/namespaces");
-          const list = data.namespaces || [];
-          if (!list.includes(namespace.value)) list.push(namespace.value);
-          namespaces.value = list.sort();
-        } catch {
-          // Namespace listing may fail if table is empty; keep current
-        }
-      }
 
       // ── Buckets ────────────────────────────────────────────
 
-      async function loadBuckets() {
-        try {
-          const data = await api("GET", "/buckets");
-          buckets.value = data.buckets || [];
-          connected.value = true;
-        } catch (e) {
-          connected.value = false;
-          if (authKey.value) showError("Failed to load buckets: " + e.message);
+      // Buckets only materialize server-side when their first memory lands, so
+      // UI-created names are tracked here and merged into every bucket refresh —
+      // otherwise they'd silently vanish on the next reload.
+      const pendingBuckets = new Set();
+
+      function mergePendingBuckets() {
+        for (const name of [...pendingBuckets]) {
+          if (buckets.value.includes(name)) pendingBuckets.delete(name);
+          else buckets.value.push(name);
         }
+        if (pendingBuckets.size) buckets.value.sort();
+      }
+
+      async function refreshBuckets() {
+        await loadBuckets();
+        mergePendingBuckets();
       }
 
       async function createBucket() {
         const name = newBucketName.value.trim();
         if (!name) return;
-        // Create an empty memory to initialise the bucket, then immediately delete it.
-        // OR simpler: just add the bucket name to the local list and it will be
-        // materialised when the first memory is added. For UX, we do the latter.
         if (buckets.value.includes(name)) {
           showError("Bucket already exists");
           return;
         }
+        pendingBuckets.add(name);
         buckets.value.push(name);
         buckets.value.sort();
         newBucketName.value = "";
         showBucketForm.value = false;
-        flash(`Bucket "${name}" ready`);
+        flash(`Bucket "${name}" ready — it persists once a memory is added`);
       }
 
       function startRenameBucket(name) {
@@ -177,6 +136,12 @@ document.addEventListener("DOMContentLoaded", () => {
           renamingBucket.value = null;
           flash(`Bucket renamed to "${newName}"`);
           if (activeBucket.value === oldName) activeBucket.value = newName;
+          // Carry the canvas layout over to the renamed bucket.
+          const savedLayout = localStorage.getItem(canvasPosKey(oldName));
+          if (savedLayout) {
+            localStorage.setItem(canvasPosKey(newName), savedLayout);
+            localStorage.removeItem(canvasPosKey(oldName));
+          }
           await reload();
         } catch (e) {
           showError("Rename failed: " + e.message);
@@ -184,7 +149,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       async function clearBucket(name) {
-        const ok = await window.PillbugDashboardConfirm.open({
+        const ok = await window.ArcaConfirm.open({
           title: "Clear bucket",
           message: `This will permanently delete ALL memories in "${name}". This cannot be undone.`,
           confirmLabel: "Clear all",
@@ -195,6 +160,7 @@ document.addEventListener("DOMContentLoaded", () => {
           await api("DELETE", `/memories?bucket=${encodeURIComponent(name)}`);
           flash(`Bucket "${name}" cleared`);
           if (activeBucket.value === name) activeBucket.value = null;
+          localStorage.removeItem(canvasPosKey(name));
           await reload();
         } catch (e) {
           showError("Clear failed: " + e.message);
@@ -418,14 +384,14 @@ document.addEventListener("DOMContentLoaded", () => {
           flash(`${parts.join(", ")}${targetBucket ? ` → "${targetBucket}"` : ""}`);
           // Post-success refresh; loadBuckets / loadMemories handle their own errors so a
           // hiccup here never mislabels a successful ingest as a failure.
-          await loadBuckets();
+          await refreshBuckets();
           isSearchResult.value = false;
           if (targetBucket) selectBucket(targetBucket);
         }
       }
 
       async function deleteMemory(m) {
-        const ok = await window.PillbugDashboardConfirm.open({
+        const ok = await window.ArcaConfirm.open({
           title: "Delete memory",
           message: `Delete "${m.content.slice(0, 80)}${m.content.length > 80 ? "..." : ""}"? Connections will be cleaned up automatically.`,
           confirmLabel: "Delete",
@@ -443,7 +409,7 @@ document.addEventListener("DOMContentLoaded", () => {
             page.value--;
             loadMemories();
           }
-          loadBuckets();
+          refreshBuckets();
         } catch (e) {
           showError("Delete failed: " + e.message);
         }
@@ -455,18 +421,26 @@ document.addEventListener("DOMContentLoaded", () => {
         editingId.value = m.memory_id;
         editContent.value = m.content;
         editBucket.value = m.bucket;
+        editNewBucket.value = "";
+        nextTick(() => {
+          const el = document.querySelector(".edit-textarea");
+          if (el) el.focus();
+        });
       }
 
       function cancelEdit() {
         editingId.value = null;
         editContent.value = "";
         editBucket.value = "";
+        editNewBucket.value = "";
       }
 
       async function saveEdit(m) {
+        // Dropdown value is a bucket name or "__new__" (use the typed name).
+        const bucket = editBucket.value === "__new__" ? editNewBucket.value.trim() : editBucket.value;
         const updates = {};
         if (editContent.value !== m.content) updates.content = editContent.value;
-        if (editBucket.value !== m.bucket) updates.bucket = editBucket.value;
+        if (bucket && bucket !== m.bucket) updates.bucket = bucket;
         if (!Object.keys(updates).length) {
           cancelEdit();
           return;
@@ -475,10 +449,10 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
           await api("PATCH", `/memories/${m.memory_id}`, updates);
           m.content = editContent.value;
-          m.bucket = editBucket.value;
+          if (updates.bucket) m.bucket = updates.bucket;
           cancelEdit();
           flash("Memory updated");
-          loadBuckets();
+          refreshBuckets();
         } catch (e) {
           showError("Update failed: " + e.message);
         } finally {
@@ -490,11 +464,40 @@ document.addEventListener("DOMContentLoaded", () => {
 
       function toggleConnections(m) {
         expandedId.value = expandedId.value === m.memory_id ? null : m.memory_id;
-        newEdge.value = { targetId: "", relType: "" };
+        newEdge.value = { query: "", targetId: "", relType: "" };
+        edgeResults.value = [];
+      }
+
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      // Resolve the link target: a pasted UUID is taken as-is; anything else is a
+      // semantic search across the namespace, offering candidates to pick from.
+      async function searchEdgeTargets(m) {
+        const q = newEdge.value.query.trim();
+        if (!q) return;
+        if (UUID_RE.test(q)) {
+          newEdge.value.targetId = q;
+          edgeResults.value = [];
+          return;
+        }
+        edgeSearching.value = true;
+        try {
+          const data = await api("POST", "/memories/search", { query: q, top_k: 5 });
+          edgeResults.value = (data.results || []).filter(r => r.memory_id !== m.memory_id);
+          if (!edgeResults.value.length) showError("No matching memories found");
+        } catch (e) {
+          showError("Search failed: " + e.message);
+        } finally {
+          edgeSearching.value = false;
+        }
+      }
+
+      function pickEdgeTarget(r) {
+        newEdge.value.targetId = r.memory_id;
       }
 
       async function addEdge(m) {
-        const targetId = newEdge.value.targetId.trim();
+        const targetId = newEdge.value.targetId;
         const relType = newEdge.value.relType.trim();
         if (!targetId || !relType) return;
         try {
@@ -505,7 +508,8 @@ document.addEventListener("DOMContentLoaded", () => {
           });
           m.connected_nodes = [...(m.connected_nodes || []), targetId];
           m.relationship_types = [...(m.relationship_types || []), relType];
-          newEdge.value = { targetId: "", relType: "" };
+          newEdge.value = { query: "", targetId: "", relType: "" };
+          edgeResults.value = [];
           flash("Connected");
         } catch (e) {
           showError("Connect failed: " + e.message);
@@ -532,35 +536,31 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
 
-      // ── Auth ───────────────────────────────────────────────
-
-      function saveAuth() {
-        if (!authKeyInput.value.trim()) return;
-        authKey.value = authKeyInput.value.trim();
-        authKeyInput.value = "";
-        localStorage.setItem("arca_auth_key", authKey.value);
-        reload();
-      }
-
-      function disconnectAuth() {
-        authKey.value = "";
-        localStorage.removeItem("arca_auth_key");
-        connected.value = false;
-        buckets.value = [];
-        memories.value = [];
-        namespaces.value = ["default"];
-      }
-
       // ── Lifecycle ──────────────────────────────────────────
 
       async function reload() {
         localStorage.setItem("arca_namespace", namespace.value || "default");
         page.value = 0;
-        await loadNamespaces();
-        await loadIngestFormats();
-        await loadBuckets();
-        await loadMemories();
+        // Independent fetches; each handles its own errors.
+        await Promise.all([loadNamespaces(), loadIngestFormats(), refreshBuckets(), loadMemories()]);
       }
+
+      // Switching namespace invalidates the bucket filter, search scope, and
+      // any not-yet-materialized bucket names (they are per-namespace).
+      function onNsChange() {
+        activeBucket.value = null;
+        isSearchResult.value = false;
+        searchQuery.value = "";
+        pendingBuckets.clear();
+        reload();
+      }
+
+      shared.onReload = reload;
+      shared.onNamespaceChange = onNsChange;
+      shared.onDisconnect = () => {
+        memories.value = [];
+        activeBucket.value = null;
+      };
 
       function formatDate(dt) {
         if (!dt) return "-";
@@ -583,6 +583,7 @@ document.addEventListener("DOMContentLoaded", () => {
         // Auth
         authKey, authKeyInput, namespace, namespaces, connected,
         saveAuth, disconnectAuth,
+        showNsForm, newNsName, createNamespace,
         // Data
         buckets, activeBucket, memories,
         isSearchResult, searchQuery,
@@ -599,17 +600,17 @@ document.addEventListener("DOMContentLoaded", () => {
         ingestAvailable, supportedFormats, acceptAttr, formatsLabel, ingestTotalKb, canIngest,
         onIngestPick, onIngestDrop, ingestDocument,
         // Inline edit
-        editingId, editContent, editBucket, updatingId,
+        editingId, editContent, editBucket, editNewBucket, updatingId,
         startEdit, cancelEdit, saveEdit,
         // Connections
-        expandedId, newEdge,
-        toggleConnections, addEdge, removeEdge,
+        expandedId, newEdge, edgeResults, edgeSearching,
+        toggleConnections, addEdge, removeEdge, searchEdgeTargets, pickEdgeTarget,
         // Bucket management
         showBucketForm, newBucketName, renamingBucket, renameBucketValue,
         createBucket, startRenameBucket, confirmRenameBucket, clearBucket,
         // Actions
         loading, searching, error, success,
-        reload, loadBuckets, loadMemories,
+        reload, onNsChange, loadBuckets, loadMemories,
         searchMemories, clearSearch, deleteMemory,
         selectBucket, formatDate,
       };
