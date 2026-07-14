@@ -72,6 +72,12 @@ app/
   `_sanitize_uuid()` in `app/util/memory.py` before being used in LanceDB predicates.
 - **Auth** — `DebugTokenVerifier` validates Bearer tokens against `ARCA_APP_AUTH_KEY`
   using constant-time comparison (`secrets.compare_digest`).
+- **Table maintenance** — a lifespan background task compacts the LanceDB table
+  (`optimize_table` in `app/util/memory.py`) at startup and every
+  `ARCA_DB_OPTIMIZE_INTERVAL` seconds. Each append/update commits a new fragment, and
+  scans open all fragments of the current version at once, so an uncompacted table
+  eventually fails with "Too many open files". The entry point also raises the soft
+  `RLIMIT_NOFILE` to the hard limit as a second guard.
 
 ## Web dashboards
 

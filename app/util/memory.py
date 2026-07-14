@@ -4,10 +4,14 @@ Utility functions for memory storage and retrieval using LanceDB.
 
 import re
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import pyarrow as pa
 from lancedb import AsyncTable
+
+if TYPE_CHECKING:
+    from lancedb._lancedb import OptimizeStats
 
 from app.core.config import settings
 from app.core.db import get_db
@@ -55,6 +59,7 @@ __all__ = (
     "get_last_memories",
     "get_memory",
     "list_namespaces",
+    "optimize_table",
     "rename_bucket",
     "update_memory",
 )
@@ -587,6 +592,19 @@ async def get_id_bucket_map(namespace: str = "default") -> dict[str, str]:
         mid = r["memory_id"]
         out[str(mid if isinstance(mid, UUID) else UUID(bytes=mid))] = r["bucket"]
     return out
+
+
+async def optimize_table() -> "OptimizeStats":
+    """Compact small fragments and prune old table versions.
+
+    Every append/update commits its rows as a new fragment, so a long-lived table
+    accumulates thousands of tiny data files. Scans open every fragment of the current
+    version concurrently and can exhaust the process file-descriptor limit
+    ("Too many open files"). Must run periodically to keep the fragment count bounded.
+    """
+
+    table = await _get_memory_table()
+    return await table.optimize()
 
 
 async def list_namespaces() -> set[str]:

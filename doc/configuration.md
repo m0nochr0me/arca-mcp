@@ -21,6 +21,7 @@ through a `.env` file in the project root. Settings are loaded by Pydantic
 | `ARCA_EMBED_MAX_RETRIES` | `int` | `3` | Max retries for an embedding call on a transient 429/5xx |
 | `ARCA_EMBED_RETRY_BASE_DELAY` | `float` | `0.5` | Base seconds for embedding-retry exponential backoff (with jitter) |
 | `ARCA_VECTOR_STORE_PATH` | `str` | `./lancedb` | LanceDB storage directory |
+| `ARCA_DB_OPTIMIZE_INTERVAL` | `int` | `86400` | Seconds between LanceDB compaction runs (also runs once at startup) |
 | `ARCA_INGEST_CHUNK_SIZE` | `int` | `512` | Target chunk size in token-counter units (kept well under the embedder's 2048-token limit) |
 | `ARCA_INGEST_CHUNK_OVERLAP` | `float` | `0.1` | Chunk overlap: a ratio of chunk size when `< 1`, else an absolute token count |
 | `ARCA_INGEST_MAX_CHUNKS` | `int` | `2000` | Maximum chunks accepted per document (cost / runaway guard) |
@@ -48,6 +49,11 @@ through a `.env` file in the project root. Settings are loaded by Pydantic
   for large document ingests, which issue many embed calls.
 - **Storage path** — `ARCA_VECTOR_STORE_PATH` is a local directory. When running in
   Docker, mount a volume there to persist data across container restarts.
+- **Table maintenance** — every append/update commits its rows as a new Lance fragment,
+  and scans open every fragment of the current version concurrently. Left uncompacted,
+  a long-lived table exhausts the file-descriptor limit ("Too many open files"). The
+  server compacts the table at startup and every `ARCA_DB_OPTIMIZE_INTERVAL` seconds,
+  and raises its soft `RLIMIT_NOFILE` to the hard limit at launch as a second guard.
 - **Document ingestion** — the `ARCA_INGEST_*` settings apply only when the optional
   `arca-ingest` add-on is installed (`uv sync --extra ingest`). Chunk sizes are measured
   with google-genai's local Gemini tokenizer when `sentencepiece` + `protobuf` are

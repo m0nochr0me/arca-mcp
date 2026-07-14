@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     EMBED_MAX_RETRIES: int = 3
     EMBED_RETRY_BASE_DELAY: float = 0.5
     VECTOR_STORE_PATH: str = "./lancedb"
+    DB_OPTIMIZE_INTERVAL: int = 24 * 3600  # seconds between table compaction runs
 
     INGEST_CHUNK_SIZE: int = 512
     INGEST_CHUNK_OVERLAP: float = 0.1

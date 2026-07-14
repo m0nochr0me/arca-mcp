@@ -24,6 +24,7 @@ from app.core.db import close_db
 from app.core.log import logger
 from app.schema.status import HealthCheckResponse, IndexResponse
 from app.util.base_dir import get_module_root
+from app.util.memory import optimize_table
 
 exec_id = ULID()
 start_time = perf_counter()
@@ -65,6 +66,21 @@ mcp_server.mount(memory_server, namespace="memory")
 mcp_app = mcp_server.http_app(path="/mcp", json_response=True)
 
 
+async def _optimize_db_loop() -> None:
+    """Compact the memory table at startup and every DB_OPTIMIZE_INTERVAL thereafter.
+
+    Without this, single-row appends/updates accumulate one fragment each and a full
+    scan eventually exhausts the file-descriptor limit (see optimize_table).
+    """
+    while True:
+        try:
+            stats = await optimize_table()
+            logger.info(f"Memory table optimized: {stats}")
+        except Exception:
+            logger.exception("Memory table optimization failed")
+        await asyncio.sleep(settings.DB_OPTIMIZE_INTERVAL)
+
+
 # Combine lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -75,10 +91,12 @@ async def lifespan(app: FastAPI):
         logger.info(f"Listening on: {settings.APP_HOST}:{settings.APP_PORT} - Workers: {settings.APP_WORKERS}")
         logger.info(f"Exec ID: {exec_id}")
 
+        optimize_task = asyncio.create_task(_optimize_db_loop())
         try:
             yield
         finally:
             logger.info(f"Shutting down {settings.PROJECT_NAME}...")
+            optimize_task.cancel()
             await close_db()
             await asyncio.sleep(2)  # Failsafe delay
 
